@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_レイヤー_1" data-name="レイヤー_1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 24 24">
+  <!-- Generator: Adobe Illustrator 30.8.1, SVG Export Plug-In . SVG Version: 2.1.4 Build 1)  -->
+  <defs>
+    <style>
+      .st0 {
+        display: none;
+        opacity: .65;
+      }
+
+      .st1 {
+        fill: #1da1f2;
+      }
+    </style>
+  </defs>
+  <image class="st0" width="121" height="121" transform="translate(-8.85 -10.41) scale(.36)" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHkAAAB5CAYAAAAd+o5JAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAKiSURBVHhe7d0xThtBFIDhR86CRMFBSEM6coNUVJHoET1SKqrcIO7iJj6IkSz5LqbxRNFkDcbsat/M//8SzbO0WunzLDD22me73W4X1nWf6oH1l8iARAYkMiCRAYkMSGRAIgMSGZDIgEQGJDIgkQGJDEhkQCIDEhmQyIBEBiQyIJEBiQxIZEAiAxIZkMiARAYkMiCRAYkMSGRAIgMSGZDIgEQGhEBeb7b1CFX3yIvlKh4en+Lh8al+CFPXyIvlKha//0TsVzMVulvkf4FLVOgukYeAS0To7pBfAy7RoLtCPga4RILuBvk9wCUKdBfIpwCXCNDNI38EuNQ7dNPIYwCXeoZuFvkt4Jsvn+tRxH5+eXFejyM6hm4S+Rjgm+urevy3+7tbFHRzyB8FLpGgm0IeC7hEgW4GeWzgEgG6CeT1ZjsJcOkt6MVyVY+bqgnky4vzuL+7rccRIwCXDkGPdfw5awI5DkCPDVBDj338uWoGOSroqQAK9FTHn6Oznr8X6uu37/WoK7xja2ol22mJDEhkQCIDEhmQyIBEBiQyIJEBiQxIZEAiAxIZkMiAZn+pcbFcxfPAxz3UbxA4paleapzynKcoxUpeb7b//WSvPt/M55wC2aYtxeV66J2Yv37+qEdpau2cXcmARAYkMiCRAYkMSGRAaZEzby4M7XZlbvb/k1+7PfTQR0LM2fOB3a2he7WyNDtyHNhjbq0x9sSnKsXlOuOKfW9ZgSMN8vXV4L3BrZT9SZricl06tCecufqe5oylQo49dESkxi6oWf/QqkuHbOOX4neyTZvIgEQGJDIgkQGJDEhkQCIDEhmQyIBEBiQyIJEBiQxIZEAiAxIZkMiARAYkMiCRAYkMSGRAIgMSGZDIgEQGJDIgkQGJDEhkQCIDegHgNTDlFECr1wAAAABJRU5ErkJggg=="/>
+  <g>
+    <path class="st1" d="M16.12,21.23c-3.38,0-8.3,0-10.78-.08-1.75-.05-2.55-1.32-2.55-2.48v-3.75h1.9v3.75c0,.38.22.57.71.58,2.82.08,8.86.09,12.1.08h.87c.26,0,.56-.13.76-.33.09-.09.19-.23.19-.39l-.03-3.68,1.9-.02.03,3.68c0,.64-.26,1.25-.74,1.74-.55.56-1.34.89-2.11.89h-2.25Z"/>
+    <rect class="st1" x="11" y="3.71" width="1.9" height="12.28"/>
+    <polygon class="st1" points="16.45 9.46 11.96 5.05 7.61 9.4 6.27 8.06 11.94 2.38 17.78 8.1 16.45 9.46"/>
+  </g>
+</svg>

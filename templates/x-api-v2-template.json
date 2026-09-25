@@ -1,0 +1,124 @@
+{
+  "_template": "X API v2 JSON import template for this app",
+  "_usage": "dataには取得した投稿、includes.usersには投稿者、includes.mediaには画像/動画、includes.tweetsには引用元・返信元などの参照投稿を入れます。",
+  "data": [
+    {
+      "id": "2100000000000000000",
+      "text": "サンプル投稿本文です。リンクはentities.urlsのexpanded_urlがあれば表示に使えます https://t.co/example",
+      "author_id": "1234567890",
+      "created_at": "2026-09-21T12:34:56Z",
+      "lang": "ja",
+      "conversation_id": "2100000000000000000",
+      "public_metrics": {
+        "retweet_count": 12,
+        "reply_count": 3,
+        "like_count": 456,
+        "quote_count": 1,
+        "bookmark_count": 9,
+        "impression_count": 12000
+      },
+      "entities": {
+        "urls": [
+          {
+            "url": "https://t.co/example",
+            "expanded_url": "https://example.com/results",
+            "display_url": "example.com/results"
+          }
+        ],
+        "hashtags": [
+          {
+            "tag": "sample"
+          }
+        ],
+        "mentions": [
+          {
+            "username": "reply_to_user",
+            "id": "9876543210"
+          }
+        ]
+      },
+      "attachments": {
+        "media_keys": [
+          "3_2100000000000000000"
+        ]
+      },
+      "referenced_tweets": [
+        {
+          "type": "quoted",
+          "id": "2099999999999999999"
+        }
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "1234567890",
+        "name": "サンプルユーザー",
+        "username": "sample_user",
+        "description": "プロフィール文またはメモ",
+        "created_at": "2020-01-01T00:00:00Z",
+        "location": "Tokyo",
+        "url": "https://example.com",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/0000000000000000000/sample_normal.jpg",
+        "profile_banner_url": "https://pbs.twimg.com/profile_banners/1234567890/1700000000",
+        "public_metrics": {
+          "followers_count": 1000,
+          "following_count": 120,
+          "tweet_count": 5000,
+          "listed_count": 10
+        },
+        "verified": false
+      }
+    ],
+    "tweets": [
+      {
+        "id": "2099999999999999999",
+        "text": "引用元または返信元の投稿本文です。",
+        "author_id": "1234567890",
+        "created_at": "2026-09-20T10:00:00Z",
+        "public_metrics": {
+          "retweet_count": 2,
+          "reply_count": 1,
+          "like_count": 30,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 2400
+        },
+        "attachments": {
+          "media_keys": [
+            "3_2099999999999999999"
+          ]
+        }
+      }
+    ],
+    "media": [
+      {
+        "media_key": "3_2100000000000000000",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/sample.jpg",
+        "width": 1200,
+        "height": 800,
+        "alt_text": "サンプル画像"
+      },
+      {
+        "media_key": "3_2099999999999999999",
+        "type": "video",
+        "preview_image_url": "https://pbs.twimg.com/ext_tw_video_thumb/sample.jpg",
+        "width": 1280,
+        "height": 720,
+        "variants": [
+          {
+            "bit_rate": 2176000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/sample/vid/avc1/1280x720/sample.mp4"
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "result_count": 1,
+    "next_token": null
+  }
+}
