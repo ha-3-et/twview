@@ -49,13 +49,14 @@ const bookmarksKey = 'x-archive-bookmarks'
 const settingsKey = 'x-archive-settings'
 const timelineTabsKey = 'x-archive-timeline-tabs'
 const detailStateKey = 'x-archive-detail'
-const buttonIconBase = '/assets/button/'
-const postIconBase = '/assets/post/'
-const profileSortIconBase = '/assets/profile/sort/'
-const profileIconBase = '/assets/profile/icon/'
-const sidebarCollectionIconBase = '/assets/sidebar/collection/icon/'
-const defaultProfileIcon = '/assets/profile/icon/default_profile_400x400.png'
-const appLogoPath = '/assets/logo/twview_logo.png'
+const publicBase = import.meta.env.BASE_URL
+const buttonIconBase = `${publicBase}assets/button/`
+const postIconBase = `${publicBase}assets/post/`
+const profileSortIconBase = `${publicBase}assets/profile/sort/`
+const profileIconBase = `${publicBase}assets/profile/icon/`
+const sidebarCollectionIconBase = `${publicBase}assets/sidebar/collection/icon/`
+const defaultProfileIcon = `${publicBase}assets/profile/icon/default_profile_400x400.png`
+const appLogoPath = `${publicBase}assets/logo/twview_logo.png`
 const emptyAdvancedFilters: AdvancedSearchFilters = { minReplies: '', minLikes: '', minReposts: '', since: '', until: '' }
 const timelinePageSize = 80
 const largeCollectionPostLimit = 2000
@@ -2226,4 +2227,4 @@ function DetailPost({ post, collection, copy, locale, avatarUrl, fallbackDisplay
 function EmptyState({ copy, onImport }: { copy: Copy; onImport: () => void }) { return <div className="empty"><div className="empty-icon"><FileUp /></div><h2>{copy.empty.title}</h2><p>{copy.empty.body}</p><button className="primary-button" onClick={onImport}>{copy.empty.action}</button></div> }
 
 createRoot(document.getElementById('root')!).render(<App />)
-if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register(`${publicBase}sw.js`).catch(() => undefined)
