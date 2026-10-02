@@ -5,7 +5,7 @@ import '@fontsource-variable/inter/standard.css'
 import '@fontsource-variable/noto-sans-jp/wght.css'
 import Papa from 'papaparse'
 import { IconCameraPlus, IconClockHour4, IconHeart, IconLetterCase } from '@tabler/icons-react'
-import { Bookmark, ChevronDown, ChevronLeft, ChevronUp, Copy as CopyIcon, Ellipsis, ExternalLink, FileText, FileUp, Image, Languages, Menu, Search, Sun, X } from 'lucide-react'
+import { Bookmark, ChevronDown, ChevronLeft, ChevronUp, Copy as CopyIcon, Ellipsis, ExternalLink, FileText, FileUp, Image, Languages, Menu, Play, Search, Sun, X } from 'lucide-react'
 import { createId } from './id'
 import { importText } from './importers'
 import type { Collection, CollectionType, EmbeddedPost, Media, Post, PostType, Profile } from './types'
@@ -183,11 +183,11 @@ const compact = (n: number | undefined, locale: string) => n === undefined ? '' 
 const compactNonZero = (n: number | undefined, locale: string) => n ? compact(n, locale) : ''
 const numberText = (n: number, locale: string) => n.toLocaleString(locale)
 const displayPostText = (text: string) => text.replace(/^'(?=@)/, '')
-const renderTextMentions = (text: string, keyPrefix: string) => text.split(/(@[A-Za-z0-9_]{1,15}|#[^\s#]+)/g).map((part, index) => part.startsWith('@') ? <span className="post-mention" key={`${keyPrefix}-mention-${index}`}>{part}</span> : part.startsWith('#') ? <span className="post-hashtag" key={`${keyPrefix}-hashtag-${index}`}>{part}</span> : part)
+const renderTextMentions = (text: string, keyPrefix: string) => text.split(/(@[A-Za-z0-9_]{1,15}|[#＃][^\s#＃]+)/g).map((part, index) => part.startsWith('@') ? <span className="post-mention" key={`${keyPrefix}-mention-${index}`}>{part}</span> : /^[#＃]/.test(part) ? <span className="post-hashtag" key={`${keyPrefix}-hashtag-${index}`}>{part}</span> : part)
 const hashtagsNotInText = (text: string, hashtags?: string[]) => {
   const normalizedText = displayPostText(text).replaceAll('＃', '#').toLocaleLowerCase()
   return (hashtags || []).filter(tag => {
-    const value = tag.trim().replace(/^#/, '')
+    const value = tag.trim().replace(/^[#\uFF03]/, '')
     return value && !normalizedText.includes(`#${value.toLocaleLowerCase()}`)
   })
 }
@@ -1463,6 +1463,7 @@ function MediaItem({ media, copy, index, postUrl, onMediaOpen }: { media: Media;
         ? <button type="button" className="media-item media-open-button video-fallback" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{content}</button>
         : <a className="media-item video-fallback" href={media.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{content}</a>
   }
+  if (isVideoMedia(media) && onMediaOpen) return <button type="button" className="media-item media-open-button video-media video-preview-button" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{media.posterUrl ? <img src={media.posterUrl} alt={copy.mediaAlt} /> : <span className="video-preview-empty" /> }<span className="media-play-indicator" aria-hidden="true"><Play size={28} fill="currentColor" /></span></button>
   if (isVideoMedia(media)) return <span className="media-item video-media" onClick={e => e.stopPropagation()}><video poster={media.posterUrl} controls preload="auto" playsInline onError={() => setVideoFailed(true)}><source src={media.url} type={videoMimeType(media.url)} /><a href={media.url} target="_blank" rel="noreferrer">{copy.detail.open}</a></video></span>
   if (imageFailed && onMediaOpen) return <button type="button" className="media-item media-open-button media-fallback" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{imageFallback}</button>
   if (imageFailed) return <a className="media-item media-fallback" href={media.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{imageFallback}</a>
@@ -1475,6 +1476,8 @@ function MediaViewer({ state, copy, locale, bookmarked, onClose, onBookmark, onC
   const index = Math.min(Math.max(state.index, 0), Math.max(media.length - 1, 0))
   const current = media[index]
   const [viewerVideoFailed, setViewerVideoFailed] = useState(false)
+  const [viewerVideoStarted, setViewerVideoStarted] = useState(false)
+  const viewerVideoRef = useRef<HTMLVideoElement>(null)
   const username = state.post.username || state.collection?.accountProfile?.username
   const authorName = displayAuthorName(state.post, copy, state.collection?.accountProfile?.displayName || state.collection?.title, state.collection?.accountProfile?.username)
   const avatarUrl = profileAvatarSrc(state.collection?.accountProfile, state.post.authorAvatarUrl)
@@ -1490,7 +1493,10 @@ function MediaViewer({ state, copy, locale, bookmarked, onClose, onBookmark, onC
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [index, media.length, onClose, onNavigate])
-  useEffect(() => setViewerVideoFailed(false), [current?.url])
+  useEffect(() => {
+    setViewerVideoFailed(false)
+    setViewerVideoStarted(false)
+  }, [current?.url])
   if (!current) return null
   return <div className="media-viewer-layer" role="dialog" aria-modal="true">
     <section className="media-viewer-stage">
@@ -1498,10 +1504,14 @@ function MediaViewer({ state, copy, locale, bookmarked, onClose, onBookmark, onC
       {index > 0 && <button className="media-viewer-nav prev" onClick={() => onNavigate(index - 1)} aria-label={copy.detail.back}><ChevronLeft size={30} /></button>}
       {isVideoMedia(current)
         ? viewerVideoFailed
-          ? <a className="media-viewer-fallback" href={url || current.url} target="_blank" rel="noreferrer">
-              {current.posterUrl ? <img className="media-viewer-media" src={current.posterUrl} alt={copy.mediaAlt} /> : copy.detail.open}
-            </a>
-          : <video className="media-viewer-media" poster={current.posterUrl} controls autoPlay playsInline onError={() => setViewerVideoFailed(true)}><source src={current.url} type={videoMimeType(current.url)} /></video>
+          ? <div className="media-viewer-fallback">
+              {current.posterUrl ? <img className="media-viewer-media" src={current.posterUrl} alt={copy.mediaAlt} /> : <span className="media-viewer-fallback-label">{copy.detail.open}</span>}
+              <a className="media-viewer-fallback-play" href={url || current.url} target="_blank" rel="noreferrer" aria-label={copy.detail.open}><Play size={42} fill="currentColor" /></a>
+            </div>
+          : <div className="media-viewer-video-wrap">
+              <video ref={viewerVideoRef} className="media-viewer-media" poster={current.posterUrl} controls playsInline onPlay={() => setViewerVideoStarted(true)} onPause={() => setViewerVideoStarted(false)} onError={() => setViewerVideoFailed(true)}><source src={current.url} type={videoMimeType(current.url)} /></video>
+              {!viewerVideoStarted && <button type="button" className="media-viewer-play" onClick={event => { event.stopPropagation(); void viewerVideoRef.current?.play() }} aria-label="動画を再生"><Play size={42} fill="currentColor" /></button>}
+            </div>
         : <img className="media-viewer-media" src={current.url} alt={copy.mediaAlt} />}
       {index < media.length - 1 && <button className="media-viewer-nav next" onClick={() => onNavigate(index + 1)} aria-label={copy.detail.open}><ChevronLeft size={30} /></button>}
       <div className="media-viewer-bottom-actions">

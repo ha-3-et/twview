@@ -401,7 +401,7 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
   const posts = [...unique.values()].sort((a, b) => dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt))
   const hashtagValues = (post: Post) => {
     const structured = post.hashtags || []
-    const inline = [...post.text.matchAll(/#([^\s#]+)/g)].map(match => match[1])
+    const inline = [...post.text.matchAll(/[#\uFF03]([^\s#\uFF03]+)/g)].map(match => match[1])
     return new Set([...structured, ...inline].map(value => value.trim().replace(/^#/, '').replace(/[.,!?。、，！？\]}）】」』]+$/, '').toLocaleLowerCase()).filter(Boolean))
   }
   const commonHashtag = posts.length > 1
