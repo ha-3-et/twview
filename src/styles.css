@@ -4474,6 +4474,13 @@ button:disabled:hover {
   }
 }
 
+@media (min-width: 930px) {
+  html {
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+  }
+}
+
 @media (max-width: 390px) {
   .tab-row button {
     padding-inline: 2px;

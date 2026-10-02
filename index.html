@@ -24,6 +24,20 @@
         }
       })()
     </script>
+    <!-- GA4: VITE_GA_MEASUREMENT_ID が設定されたビルドでのみ有効になります。 -->
+    <script>
+      window.dataLayer = window.dataLayer || []
+      window.gtag = function () { window.dataLayer.push(arguments) }
+      const gaMeasurementId = '%VITE_GA_MEASUREMENT_ID%'
+      if (/^G-[A-Z0-9]+$/.test(gaMeasurementId)) {
+        window.gtag('js', new Date())
+        window.gtag('config', gaMeasurementId, { send_page_view: true })
+        const gaScript = document.createElement('script')
+        gaScript.async = true
+        gaScript.src = `https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`
+        document.head.appendChild(gaScript)
+      }
+    </script>
     <style>
       #app-startup-loader {
         position: fixed;

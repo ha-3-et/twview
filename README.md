@@ -36,6 +36,15 @@
 - LocalStorage によるローカル保存
 - Web Manifest / PWA 対応
 
+## Google Analytics 4
+
+Google Analytics 4 は、測定IDを設定したビルドでのみ有効になります。GitHub Pagesで有効化する場合は、GitHubリポジトリの **Settings → Secrets and variables → Actions → Variables** に次のリポジトリ変数を追加してください。
+
+- 名前: `VITE_GA_MEASUREMENT_ID`
+- 値: `G-XXXXXXXXXX` 形式のGA4測定ID
+
+変数を追加して `main` にプッシュすると、GitHub Actionsが再ビルドしてGA4のトラッキングコードをページの`head`へ追加します。測定ID未設定時はGA4のスクリプトを読み込みません。Google Analyticsを利用する場合は、プライバシーポリシーにも利用目的とオプトアウト方法を記載してください。
+
 ## 対応データ
 
 - Xporter 系ツールで出力した CSV / JSON
