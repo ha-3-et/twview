@@ -47,7 +47,12 @@ const resolvedPostType = (typeValue: string, textValue: string): PostType => {
 }
 const parseParams = (input: string) => {
   const get = (keys: string[]) => keys.map(k => new RegExp(`['\"]?${k.replace(/[()]/g, '\\$&')}['\"]?\\s*:\\s*['\"]([^'\"]*)`, 'i').exec(input)?.[1]).find(Boolean)
-  return { from: get(['Dates\\(From\\)']), to: get(['Dates\\(To\\)']), account: get(['Titter Account URLs', 'Twitter Account URLs']) }
+  return {
+    from: get(['Dates\\(From\\)']),
+    to: get(['Dates\\(To\\)']),
+    account: get(['Titter Account URLs', 'Twitter Account URLs']),
+    query: get(['Search Query', 'SearchQuery', 'Search Keyword', 'Keyword', 'Keywords', 'Query'])
+  }
 }
 const inferType = (rows: Row[], source: SourceKind): CollectionType => {
   const query = source === 'octoparse' ? text(rows[0] ?? {}, 'input_params') : ''
@@ -388,8 +393,13 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
   })
   const posts = [...unique.values()].sort((a, b) => dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt))
   if (!posts.length) throw new Error('有効なツイートを読み込めませんでした。')
-  const params: { from?: string; to?: string; account?: string } = source === 'octoparse' ? parseParams(text(rows[0], 'input_params')) : {}
-  const type = source === 'twibot' && meta.query?.startsWith('#') ? 'hashtag' : inferType(rows, source)
+  const params: { from?: string; to?: string; account?: string; query?: string } = source === 'octoparse' ? parseParams(text(rows[0], 'input_params')) : {}
+  const searchQuery = meta.query || params.query || firstOf(rows, [
+    'Search_Query', 'SearchQuery', 'search_query', 'searchQuery', 'Search Query', 'Search query',
+    'Search Keyword', 'Search keyword', 'Search Term', 'Search term', 'Keyword', 'keyword',
+    'Keywords', 'keywords', 'Query', 'query', '検索キーワード', '検索語', '検索クエリ', '検索ワード', 'キーワード'
+  ])
+  const type = source === 'twibot' && searchQuery?.startsWith('#') ? 'hashtag' : inferType(rows, source)
   const username = source === 'octoparse'
     ? handle(first(rows, 'User_Handle') || params.account?.split('/').filter(Boolean).pop() || '')
     : source === 'twsearchexport'
@@ -418,9 +428,9 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
     bio: first(rows, 'Bio'), website: first(rows, 'LinkInBio'), location: first(rows, 'Location'),
     followersCount: number(first(rows, 'FollowersCount') ?? ''), followingCount: number(first(rows, 'FollowingCount') ?? '')
   } : undefined
-  const fallback = meta.query || (type === 'account' ? (username ? `@${username}` : '不明なアカウント') : '検索結果')
+  const fallback = searchQuery || (type === 'account' ? (username ? `@${username}` : '不明なアカウント') : '検索結果')
   const collection: Collection = {
-    id: createId('collection'), type, title: fallback, query: username || fallback, posts, accountProfile: profile,
+    id: createId('collection'), type, title: fallback, query: type === 'account' ? username || fallback : searchQuery || fallback, posts, accountProfile: profile,
     sourceName: filename, sourceFormat: format, importedAt: new Date().toISOString(), sourcePeriod: { from: params.from, to: params.to }
   }
   const sourceLabel = source === 'octoparse' ? 'Octoparse Twitter Scraper' : source === 'twsearchexport' ? 'TwSearchExport' : source === 'twibot' ? 'TwiBot' : source === 'twispo' ? 'ついすぽ -Tweet Export-' : source === 'xporter' ? 'XPorter' : 'TwExportly'
@@ -442,7 +452,7 @@ export async function importText(content: string, filename: string): Promise<Imp
     return buildCollection(rows, 'XML', filename)
   }
   const twibotHeader = /^id,tweetText,tweetURL,type,tweetAuthor,handle,/m.exec(content)
-  const twibotQuery = /contains\s+hashtag\s+results\s+for\s+'([^']+)'/i.exec(content.slice(0, twibotHeader?.index ?? 0))?.[1]
+  const twibotQuery = /(?:contains\s+(?:hashtag|keyword|search)?\s*results\s+for|(?:search(?:\s+(?:query|keyword))?|keyword)\s*[:=])\s*['\"]([^'\"]+)/i.exec(content.slice(0, twibotHeader?.index ?? 0))?.[1]
   const csvContent = twibotHeader ? content.slice(twibotHeader.index) : content
   return new Promise((resolve, reject) => Papa.parse<Row>(csvContent, { header: true, skipEmptyLines: 'greedy', complete: result => {
     if (result.errors.length) reject(new Error(`CSVを解析できませんでした: ${result.errors[0].message}`))

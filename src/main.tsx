@@ -5,7 +5,7 @@ import '@fontsource-variable/inter/standard.css'
 import '@fontsource-variable/noto-sans-jp/wght.css'
 import Papa from 'papaparse'
 import { IconCameraPlus, IconClockHour4, IconHeart, IconLetterCase } from '@tabler/icons-react'
-import { Bookmark, ChevronDown, ChevronLeft, ChevronUp, Copy as CopyIcon, Ellipsis, ExternalLink, FileText, FileUp, Image, Languages, Menu, Search, SlidersHorizontal, Sun, X } from 'lucide-react'
+import { Bookmark, ChevronDown, ChevronLeft, ChevronUp, Copy as CopyIcon, Ellipsis, ExternalLink, FileText, FileUp, Image, Languages, Menu, Search, Sun, X } from 'lucide-react'
 import { createId } from './id'
 import { importText } from './importers'
 import type { Collection, CollectionType, EmbeddedPost, Media, Post, PostType, Profile } from './types'
@@ -138,11 +138,17 @@ const useBodyScrollLock = (active = true) => {
 }
 const useDetailScrollbarHidden = (active = true) => {
   useEffect(() => {
-    document.documentElement.classList.toggle('detail-scrollbar-hidden', active)
+    const root = document.documentElement
+    const previousWidth = root.style.getPropertyValue('--detail-scrollbar-width')
+    const scrollbarWidth = Math.max(0, window.innerWidth - root.clientWidth)
+    root.style.setProperty('--detail-scrollbar-width', `${scrollbarWidth}px`)
+    root.classList.toggle('detail-scrollbar-hidden', active)
     document.body.classList.toggle('detail-scrollbar-hidden', active)
     return () => {
-      document.documentElement.classList.remove('detail-scrollbar-hidden')
+      root.classList.remove('detail-scrollbar-hidden')
       document.body.classList.remove('detail-scrollbar-hidden')
+      if (previousWidth) root.style.setProperty('--detail-scrollbar-width', previousWidth)
+      else root.style.removeProperty('--detail-scrollbar-width')
     }
   }, [active])
 }
@@ -165,7 +171,14 @@ const compact = (n: number | undefined, locale: string) => n === undefined ? '' 
 const compactNonZero = (n: number | undefined, locale: string) => n ? compact(n, locale) : ''
 const numberText = (n: number, locale: string) => n.toLocaleString(locale)
 const displayPostText = (text: string) => text.replace(/^'(?=@)/, '')
-const renderTextMentions = (text: string, keyPrefix: string) => text.split(/(@[A-Za-z0-9_]{1,15})/g).map((part, index) => part.startsWith('@') ? <span className="post-mention" key={`${keyPrefix}-mention-${index}`}>{part}</span> : part)
+const renderTextMentions = (text: string, keyPrefix: string) => text.split(/(@[A-Za-z0-9_]{1,15}|#[^\s#]+)/g).map((part, index) => part.startsWith('@') ? <span className="post-mention" key={`${keyPrefix}-mention-${index}`}>{part}</span> : part.startsWith('#') ? <span className="post-hashtag" key={`${keyPrefix}-hashtag-${index}`}>{part}</span> : part)
+const hashtagsNotInText = (text: string, hashtags?: string[]) => {
+  const normalizedText = displayPostText(text).replaceAll('＃', '#').toLocaleLowerCase()
+  return (hashtags || []).filter(tag => {
+    const value = tag.trim().replace(/^#/, '')
+    return value && !normalizedText.includes(`#${value.toLocaleLowerCase()}`)
+  })
+}
 const cleanUrlMatch = (value: string) => {
   const trailing = /[。．、，.!?）)\]}」』]+$/.exec(value)?.[0] || ''
   return { url: trailing ? value.slice(0, -trailing.length) : value, trailing }
@@ -213,7 +226,26 @@ const isUnknownAuthorName = (value?: string) => {
   const normalized = value?.trim()
   return !normalized || normalized === '不明なユーザー' || normalized === 'Unknown author'
 }
-const collectionDisplayTitle = (collection: Collection) => collection.type === 'account' && collection.accountProfile?.displayName ? collection.accountProfile.displayName : collection.title
+const searchQueryKeys = ['Search_Query', 'SearchQuery', 'search_query', 'searchQuery', 'Search Query', 'Search Keyword', 'Search Term', 'Keyword', 'Keywords', 'Query', 'query', '検索キーワード', '検索語', '検索クエリ', '検索ワード', 'キーワード']
+const storedSearchQuery = (collection: Collection) => {
+  if (collection.type === 'account') return ''
+  const source = collection.originalSourceText || collection.sourceText
+  if (!source) return ''
+  const metadata = /(?:contains\s+(?:hashtag|keyword|search)?\s*results\s+for|(?:search(?:\s+(?:query|keyword))?|keyword)\s*[:=])\s*[\"']([^\"']+)/i.exec(source)?.[1]?.trim()
+  if (metadata) return metadata
+  try {
+    const parsed = Papa.parse<Record<string, string>>(source, { header: true, preview: 1, skipEmptyLines: true }).data[0]
+    return searchQueryKeys.map(key => parsed?.[key]?.trim()).find(Boolean) || ''
+  } catch {
+    return ''
+  }
+}
+const collectionDisplayTitle = (collection: Collection) => {
+  if (collection.type === 'account' && collection.accountProfile?.displayName) return collection.accountProfile.displayName
+  // 検索コレクションは投稿者ではなく、検索時に使った語を名称として扱う。
+  if (collection.type === 'account') return collection.title
+  return storedSearchQuery(collection) || collection.title || collection.query?.trim() || '検索結果'
+}
 const displayAuthorName = (post: Pick<Post, 'authorName' | 'username'>, copy: { unknownAuthor: string }, fallbackDisplayName?: string, fallbackUsername?: string) => {
   const authorName = post.authorName?.trim()
   const username = post.username || fallbackUsername
@@ -254,6 +286,12 @@ const trendingScore = (post: Post) => {
     + Math.log10((post.viewCount ?? 0) + 1) * 8
     + Math.max(0, 30 - daysOld) * 2
 }
+const popularScore = (post: Post) =>
+  (post.likeCount ?? 0)
+  + (post.repostCount ?? 0) * 3
+  + (post.quoteCount ?? 0) * 4
+  + (post.replyCount ?? 0) * 2
+  + Math.log10((post.viewCount ?? 0) + 1) * 8
 const dateText = (date: string, locale: string) => {
   if (!date) return ''
   const d = new Date(sortableDateText(date))
@@ -299,9 +337,13 @@ type ParsedSearchQuery = {
   minRetweets?: number
   mediaFilter?: 'images' | 'videos'
 }
-const normalizeSearchCommands = (query: string) => query.replace(/\bmin_(retweets|reposts|faves|likes|replies):\s*([0-9][\d,]*)/gi, (_match, kind: string, value: string) => `min_${kind}:${value.replace(/,/g, '')}`)
+const normalizeSearchText = (value: string) => value
+  .normalize('NFKC')
+  .replace(/[\u30a1-\u30f6]/g, char => String.fromCharCode(char.charCodeAt(0) - 0x60))
+  .toLocaleLowerCase()
+const normalizeSearchCommands = (query: string) => normalizeSearchText(query).replace(/\bmin_(retweets|reposts|faves|likes|replies):\s*([0-9][\d,]*)/g, (_match, kind: string, value: string) => `min_${kind}:${value.replace(/,/g, '')}`)
 const tokenizeSearchQuery = (query: string) => normalizeSearchCommands(query).replace(/(\S)-"/g, '$1 -"').match(/-?"[^"]+"|\S+/g) ?? []
-const stripSearchTokenQuotes = (token: string) => token.replace(/^"|"$/g, '').trim().toLocaleLowerCase()
+const stripSearchTokenQuotes = (token: string) => normalizeSearchText(token.replace(/^"|"$/g, '').trim())
 const parsedSearchCache = new Map<string, ParsedSearchQuery>()
 const parseSearchQuery = (query: string): ParsedSearchQuery => {
   const cached = parsedSearchCache.get(query)
@@ -348,9 +390,7 @@ const parseSearchQuery = (query: string): ParsedSearchQuery => {
   }
   return parsed
 }
-const matchesSearch = (value: string, query: string) => {
-  const parsed = parseSearchQuery(query)
-  const haystack = value.toLocaleLowerCase()
+const matchesParsedSearch = (haystack: string, parsed: ParsedSearchQuery) => {
   if (parsed.excludeTerms.some(term => haystack.includes(term))) return false
   if (!parsed.includeGroups.length) return true
   return parsed.includeGroups.some(group => group.every(term => haystack.includes(term)))
@@ -383,8 +423,7 @@ const displayMediaItems = (media: Media[]) => {
     .filter(item => !isVideoPosterImage(item))
     .map(item => isVideoMedia(item) && !item.posterUrl && posters[posterIndex] ? { ...item, posterUrl: posters[posterIndex++]!.url } : item)
 }
-const matchesSearchCommands = (post: Post, query: string) => {
-  const parsed = parseSearchQuery(query)
+const matchesParsedSearchCommands = (post: Post, parsed: ParsedSearchQuery) => {
   if (parsed.minReplies !== undefined && (post.replyCount ?? 0) < parsed.minReplies) return false
   if (parsed.minLikes !== undefined && (post.likeCount ?? 0) < parsed.minLikes) return false
   if (parsed.minRetweets !== undefined && (post.repostCount ?? 0) < parsed.minRetweets) return false
@@ -1000,12 +1039,10 @@ function App() {
   const [searchDraft, setSearchDraft] = useState('')
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false)
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedSearchFilters>(emptyAdvancedFilters)
-  const [filterOpen, setFilterOpen] = useState(false)
   const [confirmingClearBookmarks, setConfirmingClearBookmarks] = useState(false)
   const [renamingCollection, setRenamingCollection] = useState<Collection | null>(null)
   const [deletingCollection, setDeletingCollection] = useState<Collection | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
-  const [mediaOnly, setMediaOnly] = useState(false)
   const [detail, setDetail] = useState<Post | null>(null)
   const [detailCollectionId, setDetailCollectionId] = useState<string | null>(null)
   const [mediaViewer, setMediaViewer] = useState<MediaViewerState | null>(null)
@@ -1220,7 +1257,11 @@ function App() {
   const bookmarkedItems = useMemo(() => allPosts.filter(x => bookmarkIdSet.has(x.post.id)), [allPosts, bookmarkIdSet])
   const title = view === 'timeline' && active ? collectionDisplayTitle(active) : copy.titles[view as Exclude<View, 'timeline'>]
   const timelineHeader = view === 'timeline' && !!active
-  const timelineHeaderTitle = timelineHeader ? (active.accountProfile?.displayName || active.posts.find(post => !isUnknownAuthorName(post.authorName))?.authorName || collectionDisplayTitle(active)) : title
+  const timelineHeaderTitle = timelineHeader
+    ? (active.type === 'account'
+      ? active.accountProfile?.displayName || active.posts.find(post => !isUnknownAuthorName(post.authorName))?.authorName || collectionDisplayTitle(active)
+      : collectionDisplayTitle(active))
+    : title
   const hasSearchableData = allPosts.length > 0
   const searchableView = hasSearchableData && (view === 'timeline' || view === 'bookmarks')
   const closeMediaViewer = () => {
@@ -1238,18 +1279,18 @@ function App() {
     <aside className="desktop-nav"><DrawerContent collections={collections} total={allPosts.length} currentView={view} copy={copy} locale={locale} onNav={nav} onSelect={select} activeId={active?.id} /></aside>
     <main className="phone-frame">
       {view !== 'import' && <Header title={timelineHeaderTitle || copy.appName} subtitle={timelineHeader ? copy.postCount(active.posts.length, locale) : undefined} profile={timelineHeader} copy={copy} searchable={searchableView} searching={searchableView && searching} query={searchDraft} onMenu={() => setDrawer(true)} onBack={() => nav('collections')} onSearch={() => { setSearchDraft(query); setSearching(true) }} onQuery={setSearchDraft} onSubmitSearch={() => setQuery(searchDraft.trim())} onAdvancedSearch={() => setAdvancedSearchOpen(true)} onCancel={() => { setSearching(false); setAdvancedSearchOpen(false); setQuery(''); setSearchDraft(''); setAdvancedFilters(emptyAdvancedFilters) }} />}
-      {view === 'timeline' && active && <Timeline collection={active} copy={copy} locale={locale} query={query} advancedFilters={advancedFilters} mediaOnly={mediaOnly} bookmarks={bookmarks} onBookmark={toggleBookmark} onDetail={post => openDetail(post, active)} onMediaOpen={(post, collection, index) => setMediaViewer({ post, collection, index })} onCopy={copyToClipboard} onFilter={() => setFilterOpen(true)} onProfileEdit={updateProfile} />}
+      {view === 'timeline' && active && <Timeline collection={active} copy={copy} locale={locale} query={query} advancedFilters={advancedFilters} bookmarks={bookmarks} onBookmark={toggleBookmark} onDetail={post => openDetail(post, active)} onMediaOpen={(post, collection, index) => setMediaViewer({ post, collection, index })} onCopy={copyToClipboard} onProfileEdit={updateProfile} />}
       {view === 'timeline' && !active && <EmptyState copy={copy} onImport={() => nav('import')} />}
       {view === 'collections' && <CollectionList collections={collections} copy={copy} locale={locale} onSelect={select} onRename={startRenameCollection} onDelete={setDeletingCollection} onImport={() => nav('import')} />}
       {view === 'bookmarks' && <Bookmarks items={bookmarkedItems} copy={copy} locale={locale} query={query} bookmarks={bookmarks} onBookmark={toggleBookmark} onDetail={openDetail} onMediaOpen={(post, collection, index) => setMediaViewer({ post, collection, index })} onCopy={copyToClipboard} />}
       {view === 'import' && <ImportView copy={copy} onImport={beginImport} onBack={active ? () => nav('timeline') : undefined} onMenu={() => setDrawer(true)} />}
       {view === 'settings' && <SettingsView theme={theme} language={language} font={font} appLanguage={appLanguage} copy={copy} setTheme={setTheme} setLanguage={setLanguage} setFont={setFont} onClearBookmarks={() => setConfirmingClearBookmarks(true)} />}
       {view === 'info' && infoCollection && <InfoView collections={collections} collection={infoCollection} copy={copy} locale={locale} onSelect={setInfoCollectionId} onAddPost={setAddingPostCollection} onExportCsv={exportCollectionCsv} onSaveSource={saveCollectionSource} />}
-      {detail && <PostDetail post={detail} collection={detailCollection} copy={copy} locale={locale} bookmarked={bookmarks.includes(detail.id)} onBack={closeDetail} onBookmark={toggleBookmark} onDetail={post => openDetail(post, detailCollection)} onMediaOpen={(post, index) => setMediaViewer({ post, collection: detailCollection, index })} onCopy={copyToClipboard} />}
     </main>
+    {detail && <div className="detail-scrim" aria-hidden="true" />}
+    {detail && <PostDetail post={detail} collection={detailCollection} copy={copy} locale={locale} bookmarked={bookmarks.includes(detail.id)} onBack={closeDetail} onBookmark={toggleBookmark} onDetail={post => openDetail(post, detailCollection)} onMediaOpen={(post, index) => setMediaViewer({ post, collection: detailCollection, index })} onCopy={copyToClipboard} />}
     {advancedSearchOpen && <AdvancedSearchDialog copy={copy} filters={advancedFilters} setFilters={setAdvancedFilters} onClose={() => setAdvancedSearchOpen(false)} onSearch={() => { setQuery(searchDraft.trim()); setAdvancedSearchOpen(false) }} />}
     {drawer && <><Scrim onClick={() => setDrawer(false)} /><aside className="drawer"><DrawerContent collections={collections} total={allPosts.length} currentView={view} copy={copy} locale={locale} onNav={nav} onSelect={select} activeId={active?.id} /></aside></>}
-    {filterOpen && <FilterSheet copy={copy} mediaOnly={mediaOnly} setMediaOnly={setMediaOnly} onClose={() => setFilterOpen(false)} />}
     {addingPostCollection && <AddPostDialog collection={addingPostCollection} copy={copy} appLanguage={appLanguage} onSave={addManualPost} onCancel={() => setAddingPostCollection(null)} />}
     {renamingCollection && <RenameCollectionDialog copy={copy} value={renameDraft} onChange={setRenameDraft} onSave={saveRenameCollection} onCancel={() => { setRenamingCollection(null); setRenameDraft('') }} />}
     {deletingCollection && <ConfirmDialog title={copy.confirm.deleteCollectionTitle} body={copy.confirm.deleteCollectionBody(deletingCollection.title)} confirmLabel={copy.confirm.deleteAction} cancelLabel={copy.confirm.cancelAction} onConfirm={deleteCollection} onCancel={() => setDeletingCollection(null)} />}
@@ -1434,7 +1475,7 @@ function DrawerContent({ collections, total, currentView, copy, locale, onNav, o
   </div>
 }
 
-function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly, bookmarks, onBookmark, onDetail, onMediaOpen, onCopy, onFilter, onProfileEdit }: { collection: Collection; copy: Copy; locale: string; query: string; advancedFilters: AdvancedSearchFilters; mediaOnly: boolean; bookmarks: string[]; onBookmark: (p: Post) => void; onDetail: (p: Post) => void; onMediaOpen: (post: Post, collection: Collection, index: number) => void; onCopy: (value: string, message: string) => void; onFilter: () => void; onProfileEdit: (collection: Collection, profile: Profile) => void }) {
+function Timeline({ collection, copy, locale, query, advancedFilters, bookmarks, onBookmark, onDetail, onMediaOpen, onCopy, onProfileEdit }: { collection: Collection; copy: Copy; locale: string; query: string; advancedFilters: AdvancedSearchFilters; bookmarks: string[]; onBookmark: (p: Post) => void; onDetail: (p: Post) => void; onMediaOpen: (post: Post, collection: Collection, index: number) => void; onCopy: (value: string, message: string) => void; onProfileEdit: (collection: Collection, profile: Profile) => void }) {
   const [tab, setTab] = useState<TimelineTab>(() => savedTimelineTab(collection.id))
   const [sortMode, setSortMode] = useState<SortMode>('newest')
   const [sortOpen, setSortOpen] = useState(false)
@@ -1443,9 +1484,12 @@ function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly,
   const [visibleCount, setVisibleCount] = useState(timelinePageSize)
   const tabTimer = useRef<number | null>(null)
   const deferredQuery = useDeferredValue(query)
+  const parsedQuery = useMemo(() => parseSearchQuery(deferredQuery), [deferredQuery])
   const advancedActive = hasAdvancedSearchFilters(advancedFilters)
   const searchMode = deferredQuery.trim().length > 0 || advancedActive
   const hasReposts = useMemo(() => collection.posts.some(post => post.type === 'repost'), [collection.posts])
+  const account = collection.type === 'account'
+  const searchablePosts = useMemo(() => collection.posts.map(post => ({ post, haystack: normalizeSearchText(postSearchText(post, collection.type)) })), [collection.posts, collection.type])
   const searchKey = useMemo(() => searchMode ? JSON.stringify({ query: deferredQuery.trim(), advancedFilters }) : '', [searchMode, deferredQuery, advancedFilters])
   const previousSearchKey = useRef('')
   const wasSearchMode = useRef(false)
@@ -1455,8 +1499,9 @@ function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly,
     setSortOpen(false)
     setSortSubmenuOpen(false)
     setTabLoading(false)
-    setTab(savedTimelineTab(collection.id))
-  }, [collection.id])
+    const savedTab = savedTimelineTab(collection.id)
+    setTab(!account && savedTab === 'replies' ? 'posts' : savedTab)
+  }, [collection.id, account])
   useEffect(() => {
     if (searchMode) return
     const saved = load<Record<string, TimelineTab>>(timelineTabsKey, {})
@@ -1485,19 +1530,23 @@ function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly,
     }
   }, [collection.id, searchKey, searchMode])
   const posts = useMemo(() => {
-    const filtered = collection.posts.filter(post => {
-      const haystack = postSearchText(post, collection.type)
-      const matches = matchesSearch(haystack, deferredQuery)
-      const typeMatch = searchMode ? (tab === 'media' ? !!post.media?.length && post.type !== 'repost' : true) : tab === 'replies' ? post.type === 'reply' : tab === 'reposts' ? post.type === 'repost' : tab === 'media' ? !!post.media?.length && post.type !== 'repost' : post.type !== 'reply' && post.type !== 'repost'
-      return matches && matchesSearchCommands(post, deferredQuery) && typeMatch && (!searchMode || post.type !== 'repost') && (!advancedActive || matchesAdvancedSearch(post, advancedFilters)) && (!mediaOnly || !!post.media?.length)
+    const filtered = searchablePosts.filter(({ post, haystack }) => {
+      const matches = matchesParsedSearch(haystack, parsedQuery)
+      const typeMatch = searchMode
+        ? (tab === 'media' ? !!post.media?.length && post.type !== 'repost' : true)
+        : account
+          ? tab === 'replies' ? post.type === 'reply' : tab === 'reposts' ? post.type === 'repost' : tab === 'media' ? !!post.media?.length && post.type !== 'repost' : post.type !== 'reply' && post.type !== 'repost'
+          : tab === 'media' ? !!post.media?.length && post.type !== 'repost' : true
+      return matches && matchesParsedSearchCommands(post, parsedQuery) && typeMatch && (!searchMode || post.type !== 'repost') && (!advancedActive || matchesAdvancedSearch(post, advancedFilters))
     })
-    return [...filtered].sort((a, b) => {
+    return filtered.map(({ post }) => post).sort((a, b) => {
       if (searchMode && tab === 'posts') return trendingScore(b) - trendingScore(a) || dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt)
       if (searchMode && tab === 'replies') return dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt)
-      return sortMode === 'popular' ? ((b.likeCount ?? 0) - (a.likeCount ?? 0)) || dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt) : dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt)
+      const popular = tab === 'posts' && sortMode === 'popular'
+      return popular ? popularScore(b) - popularScore(a) || dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt) : dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt)
     })
-  }, [collection, query, deferredQuery, advancedFilters, advancedActive, tab, mediaOnly, sortMode])
-  useEffect(() => setVisibleCount(timelinePageSize), [collection.id, searchKey, tab, sortMode, mediaOnly, advancedActive])
+  }, [searchablePosts, parsedQuery, searchMode, advancedFilters, advancedActive, tab, sortMode, account])
+  useEffect(() => setVisibleCount(timelinePageSize), [collection.id, searchKey, tab, sortMode, advancedActive])
   useEffect(() => {
     if (visibleCount >= posts.length) return
     const loadMore = () => {
@@ -1509,8 +1558,7 @@ function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly,
     return () => window.removeEventListener('scroll', loadMore)
   }, [posts.length, visibleCount])
   const visiblePosts = useMemo(() => posts.slice(0, visibleCount), [posts, visibleCount])
-  const account = collection.type === 'account'
-  const tabs = account ? [['posts', copy.tabs.posts], ['replies', copy.tabs.replies], ...(hasReposts ? [['reposts', copy.tabs.reposts]] : []), ['media', copy.tabs.media]] : [['posts', copy.tabs.latest], ['replies', copy.tabs.popular], ['media', copy.tabs.media]]
+  const tabs = account ? [['posts', copy.tabs.posts], ['replies', copy.tabs.replies], ...(hasReposts ? [['reposts', copy.tabs.reposts]] : []), ['media', copy.tabs.media]] : [['posts', copy.tabs.latest], ['media', copy.tabs.media]]
   const searchTabs = [['posts', copy.searchTabs.top], ['replies', copy.searchTabs.latest], ['media', copy.searchTabs.media]]
   const bookmarkSet = useMemo(() => new Set(bookmarks), [bookmarks])
   const renderedPosts = useMemo(() => visiblePosts.map(post => <PostCard key={post.id} post={post} collection={collection} copy={copy} locale={locale} avatarUrl={profileAvatarSrc(collection.accountProfile, post.authorAvatarUrl)} fallbackDisplayName={collection.accountProfile?.displayName || collection.title} fallbackUsername={collection.accountProfile?.username} bookmarked={bookmarkSet.has(post.id)} onBookmark={onBookmark} onDetail={onDetail} onMediaOpen={(post, index) => onMediaOpen(post, collection, index)} onCopy={onCopy} />), [visiblePosts, copy, locale, collection, bookmarkSet, onBookmark, onDetail, onMediaOpen, onCopy])
@@ -1543,7 +1591,7 @@ function Timeline({ collection, copy, locale, query, advancedFilters, mediaOnly,
     <div className="tab-area"><div className="tab-row">{searchMode ? searchTabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => chooseTab(key as TimelineTab)}>{label}</button>) : tabs.map(([key, label]) => <button key={key} className={`${tab === key ? 'active' : ''} ${key === 'posts' ? 'sort-tab' : ''}`} onClick={() => key === 'posts' ? (tab === 'posts' ? togglePostsMenu() : chooseTab('posts')) : chooseTab(key as typeof tab)}>{key === 'posts' && tab === 'posts' ? <span>{label}<TabCaret /></span> : label}</button>)}</div>
       {!searchMode && sortOpen && <><button className="sort-scrim" aria-label={copy.cancel} onClick={() => { setSortOpen(false); setSortSubmenuOpen(false) }} /><div className={`sort-menu ${sortSubmenuOpen ? 'sort-menu-blocked' : ''}`}><button className={tab === 'posts' ? 'selected' : ''} onClick={() => { setTab('posts'); setSortOpen(false); setSortSubmenuOpen(false); scrollTimelineTop() }}>{copy.tabs.posts}<SortCheckIcon /></button><button className={sortSubmenuOpen ? 'active-branch' : ''} onClick={() => setSortSubmenuOpen(true)}>{copy.tabs.sort}<SortNextIcon /></button></div>{sortSubmenuOpen && <div className="sort-menu sort-submenu"><button className={sortMode === 'newest' ? 'selected' : ''} onClick={() => chooseSort('newest')}><IconClockHour4 stroke={1.5} /> {copy.tabs.newest}<SortCheckIcon /></button><button className={sortMode === 'popular' ? 'selected' : ''} onClick={() => chooseSort('popular')}><IconHeart stroke={2} /> {copy.tabs.popular}<SortCheckIcon /></button></div>}</>}
     </div>
-    {!searchMode && !account && <div className="results-line">{copy.postCount(collection.posts.length, locale)}<button onClick={onFilter} aria-label={copy.filter.title}><SlidersHorizontal size={18} /></button></div>}
+    {!searchMode && !account && <div className="results-line">{copy.postCount(collection.posts.length, locale)}</div>}
     <div className="timeline">{tabLoading ? <div className="timeline-loading"><span /></div> : <>{renderedPosts}{visibleCount < posts.length && <div className="timeline-loading more-loading"><span /></div>}{posts.length === 0 && (searchMode ? <SearchEmpty query={deferredQuery} copy={copy} /> : <div className="no-posts">{copy.noPosts}</div>)}</>}</div>
   </section>
 }
@@ -1561,7 +1609,7 @@ const profileExternalUrl = (collection: Collection) => {
 
 function CollectionHero({ collection, copy, locale, onProfileEdit }: { collection: Collection; copy: Copy; locale: string; onProfileEdit: (collection: Collection, profile: Profile) => void }) {
   const [editing, setEditing] = useState(false)
-  if (collection.type !== 'account') return <div className="search-hero"><h1>{collection.title}</h1><p>{copy.postCount(collection.posts.length, locale)}</p></div>
+  if (collection.type !== 'account') return <div className="search-hero"><h1>{collectionDisplayTitle(collection)}</h1><p>{copy.postCount(collection.posts.length, locale)}</p></div>
   const p = collection.accountProfile
   const username = p?.username || collection.posts.find(post => post.username)?.username || (/^@[\w_]+$/.test(collection.title) ? collection.title : '')
   const hasMeta = !!(p?.website || p?.location || p?.joinedAt)
@@ -1786,6 +1834,17 @@ function ArticleCard({ post }: { post: Post }) {
   </div>
 }
 
+function ExpandablePostText({ text, urls }: { text: string; urls?: string[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const value = displayPostText(text)
+  const lineCount = value.split(/\r?\n/).length
+  const expandable = Array.from(value).length > 140 || lineCount > 11
+  return <>
+    <p className={expandable && !expanded ? 'post-text-collapsed' : undefined}>{renderPostText(text, urls)}</p>
+    {expandable && !expanded && <button className="post-show-more" type="button" onClick={event => { event.stopPropagation(); setExpanded(true) }}>さらに表示</button>}
+  </>
+}
+
 function PostCard({ post, collection, copy, locale, avatarUrl, fallbackDisplayName, fallbackUsername, bookmarked, onBookmark, onDetail, onMediaOpen, onCopy }: { post: Post; collection?: Collection; copy: Copy; locale: string; avatarUrl?: string; fallbackDisplayName?: string; fallbackUsername?: string; bookmarked: boolean; onBookmark: (p: Post) => void; onDetail: (p: Post) => void; onMediaOpen: (post: Post, index: number) => void; onCopy: (value: string, message: string) => void }) {
   const username = post.username || fallbackUsername
   const authorName = displayAuthorName(post, copy, fallbackDisplayName, fallbackUsername)
@@ -1796,10 +1855,11 @@ function PostCard({ post, collection, copy, locale, avatarUrl, fallbackDisplayNa
   const article = postArticleInfo(post)
   const visibleText = article ? postTextWithoutArticleUrl(post) : post.text
   const visibleUrls = article ? urlsWithoutArticleUrl(post) : post.urls
+  const visibleHashtags = hashtagsNotInText(visibleText, post.hashtags)
   const replyMentionPrefix = replyingTo ? `@${replyingTo.replace(/^@/, '').toLowerCase()}` : ''
   const textHasReplyMention = Boolean(replyMentionPrefix && visibleText.trimStart().toLowerCase().startsWith(replyMentionPrefix))
   const showReplyNotice = Boolean(replyingTo && !textHasReplyMention)
-  const currentPost = <div className="reply-child-row"><div className="avatar" onClick={e => e.stopPropagation()}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><div className="post-body"><div className="post-top"><b>{authorName}</b>{username && <span>@{username.replace(/^@/, '')}</span>}<span>· {dateText(post.createdAt, locale)}</span><PostMoreMenu post={post} copy={copy} fallbackUsername={username} onCopy={onCopy} /></div>{showReplyNotice && <ReplyToNotice username={replyingTo!} locale={locale} />}{visibleText && <p>{renderPostText(visibleText, visibleUrls)}</p>}{post.hashtags?.length ? <div className="hashtags">{post.hashtags.map(h => <span key={h}>#{h}</span>)}</div> : null}{article ? <ArticleCard post={post} /> : post.media?.length ? <MediaGrid media={post.media} copy={copy} onMediaOpen={index => onMediaOpen(post, index)} /> : null}{post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}<div className="post-actions"><span><PostActionIcon name="reply" /> {compactNonZero(post.replyCount, locale)}</span><span><PostActionIcon name="retweet" /> {compactNonZero(post.repostCount, locale)}</span><span><PostActionIcon name="like" /> {compactNonZero(post.likeCount, locale)}</span><span><PostActionIcon name="impression" /> {compact(post.viewCount, locale)}</span><button onClick={e => { e.stopPropagation(); onBookmark(post) }} className={bookmarked ? 'marked' : ''} aria-label={copy.nav.bookmarks}><PostBookmarkIcon marked={bookmarked} /></button></div></div></div>
+  const currentPost = <div className="reply-child-row"><div className="avatar" onClick={e => e.stopPropagation()}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><div className="post-body"><div className="post-top"><b>{authorName}</b>{username && <span>@{username.replace(/^@/, '')}</span>}<span>· {dateText(post.createdAt, locale)}</span><PostMoreMenu post={post} copy={copy} fallbackUsername={username} onCopy={onCopy} /></div>{showReplyNotice && <ReplyToNotice username={replyingTo!} locale={locale} />}{visibleText && <ExpandablePostText text={visibleText} urls={visibleUrls} />}{visibleHashtags.length ? <div className="hashtags">{visibleHashtags.map(h => <span key={h}>#{h.replace(/^#/, '')}</span>)}</div> : null}{article ? <ArticleCard post={post} /> : post.media?.length ? <MediaGrid media={post.media} copy={copy} onMediaOpen={index => onMediaOpen(post, index)} /> : null}{post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}<div className="post-actions"><span><PostActionIcon name="reply" /> {compactNonZero(post.replyCount, locale)}</span><span><PostActionIcon name="retweet" /> {compactNonZero(post.repostCount, locale)}</span><span><PostActionIcon name="like" /> {compactNonZero(post.likeCount, locale)}</span><span><PostActionIcon name="impression" /> {compact(post.viewCount, locale)}</span><button onClick={e => { e.stopPropagation(); onBookmark(post) }} className={bookmarked ? 'marked' : ''} aria-label={copy.nav.bookmarks}><PostBookmarkIcon marked={bookmarked} /></button></div></div></div>
   return <article className={`post ${post.repliedPost ? 'thread-post' : ''}`} onClick={() => onDetail(post)}>{post.repliedPost && <ReplyParentPost post={post.repliedPost} copy={copy} locale={locale} avatarUrl={parentAvatarUrl} />}{currentPost}</article>
 }
 
@@ -1807,8 +1867,10 @@ function CollectionList({ collections, copy, locale, onSelect, onRename, onDelet
 function Bookmarks({ items, copy, locale, query, bookmarks, onBookmark, onDetail, onMediaOpen, onCopy }: { items: { post: Post; collection: Collection }[]; copy: Copy; locale: string; query: string; bookmarks: string[]; onBookmark: (p: Post) => void; onDetail: (p: Post, collection: Collection) => void; onMediaOpen: (post: Post, collection: Collection, index: number) => void; onCopy: (value: string, message: string) => void }) {
   const [visibleCount, setVisibleCount] = useState(timelinePageSize)
   const deferredQuery = useDeferredValue(query)
+  const parsedQuery = useMemo(() => parseSearchQuery(deferredQuery), [deferredQuery])
   const bookmarkSet = useMemo(() => new Set(bookmarks), [bookmarks])
-  const filtered = useMemo(() => items.filter(x => matchesSearch(postSearchText(x.post, x.collection.type, x.collection.accountProfile?.username), deferredQuery) && matchesSearchCommands(x.post, deferredQuery)), [items, deferredQuery])
+  const searchableItems = useMemo(() => items.map(item => ({ ...item, haystack: normalizeSearchText(postSearchText(item.post, item.collection.type, item.collection.accountProfile?.username)) })), [items])
+  const filtered = useMemo(() => searchableItems.filter(item => matchesParsedSearch(item.haystack, parsedQuery) && matchesParsedSearchCommands(item.post, parsedQuery)), [searchableItems, parsedQuery])
   useEffect(() => setVisibleCount(timelinePageSize), [deferredQuery, items])
   useEffect(() => {
     if (visibleCount >= filtered.length) return
@@ -1944,15 +2006,16 @@ function CsvTableEditor({ copy, value, onChange }: { copy: Copy; value: string; 
     }
   }, [])
   const columnKind = (header: string) => /本文|text|tweet|body|content/i.test(header) ? 'text' : /url|リンク|メディア|media|image|video/i.test(header) ? 'url' : /日付|date|time|日時/i.test(header) ? 'date' : /数|count|いいね|返信|リポスト|表示|bookmark|like|view|reply|retweet/i.test(header) ? 'number' : 'default'
-  const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase()
+  const deferredSearchTerm = useDeferredValue(searchTerm)
+  const normalizedSearchTerm = normalizeSearchText(deferredSearchTerm.trim())
   const searchResults = useMemo<CsvSearchResult[]>(() => {
     if (!normalizedSearchTerm || !table) return []
     const matches: CsvSearchResult[] = []
     table.headers.forEach((header, columnIndex) => {
-      if (header.toLocaleLowerCase().includes(normalizedSearchTerm)) matches.push({ key: `header-${columnIndex}`, rowIndex: -1, columnIndex, header: true })
+      if (normalizeSearchText(header).includes(normalizedSearchTerm)) matches.push({ key: `header-${columnIndex}`, rowIndex: -1, columnIndex, header: true })
     })
     table.rows.forEach((row, rowIndex) => row.forEach((cell, columnIndex) => {
-      if ((cell ?? '').toLocaleLowerCase().includes(normalizedSearchTerm)) matches.push({ key: `cell-${rowIndex}-${columnIndex}`, rowIndex, columnIndex, header: false })
+      if (normalizeSearchText(cell ?? '').includes(normalizedSearchTerm)) matches.push({ key: `cell-${rowIndex}-${columnIndex}`, rowIndex, columnIndex, header: false })
     }))
     return matches
   }, [normalizedSearchTerm, table])
@@ -1993,7 +2056,7 @@ function CsvTableEditor({ copy, value, onChange }: { copy: Copy; value: string; 
   useEffect(() => {
     setActiveSearchResult(0)
     if (searchResults.length) scrollToSearchResult(0)
-  }, [searchTerm, searchResults.length, scrollToSearchResult])
+  }, [deferredSearchTerm, searchResults.length, scrollToSearchResult])
   if (!table) return <div className="csv-table-loading" aria-label="Loading CSV table"><span /></div>
   const commit = (next: CsvTableData) => {
     setTable(next)
@@ -2099,7 +2162,6 @@ function InfoRow({ label, value }: { label: string; value: string }) { return <d
 function Scrim({ onClick }: { onClick: () => void }) {
   return <div className="scrim" role="presentation" onClick={onClick} />
 }
-function FilterSheet({ copy, mediaOnly, setMediaOnly, onClose }: { copy: Copy; mediaOnly: boolean; setMediaOnly: (v: boolean) => void; onClose: () => void }) { return <><Scrim onClick={onClose} /><section className="sheet"><div className="sheet-handle" /><div className="sheet-title"><h2>{copy.filter.title}</h2><button onClick={onClose}><X /></button></div><label className="check-row"><span><Image size={20} /> {copy.filter.mediaOnly}</span><input type="checkbox" checked={mediaOnly} onChange={e => setMediaOnly(e.target.checked)} /></label><button className="primary-button" onClick={onClose}>{copy.filter.apply}</button></section></> }
 function AdvancedSearchDialog({ copy, filters, setFilters, onClose, onSearch }: { copy: Copy; filters: AdvancedSearchFilters; setFilters: (filters: AdvancedSearchFilters) => void; onClose: () => void; onSearch: () => void }) {
   const update = (key: keyof AdvancedSearchFilters, value: string) => setFilters({ ...filters, [key]: value })
   const { closing, close } = useAnimatedClose(onClose)
@@ -2198,6 +2260,7 @@ function DetailPost({ post, collection, copy, locale, avatarUrl, fallbackDisplay
   const count = (n?: number) => compactNonZero(n, locale)
   const url = postCanonicalUrl(post, fallbackUsername)
   const authorName = displayAuthorName(post, copy, fallbackDisplayName, fallbackUsername)
+  const visibleHashtags = hashtagsNotInText(post.text, post.hashtags)
   const replyingTo = replyTargetUsername(post)
   const parentAvatarUrl = relatedPostAvatarUrl(post.repliedPost, post, avatarUrl, fallbackUsername)
   const quoteAvatarUrl = relatedPostAvatarUrl(post.quotedPost, post, avatarUrl, fallbackUsername)
@@ -2211,7 +2274,7 @@ function DetailPost({ post, collection, copy, locale, avatarUrl, fallbackDisplay
     </div>
     {replyingTo && <ReplyToNotice username={replyingTo} locale={locale} />}
     <p className="detail-post-text">{renderPostText(post.text, post.urls)}</p>
-    {post.hashtags?.length ? <div className="hashtags">{post.hashtags.map(h => <span key={h}>#{h}</span>)}</div> : null}
+{visibleHashtags.length ? <div className="hashtags">{visibleHashtags.map(h => <span key={h}>#{h.replace(/^#/, '')}</span>)}</div> : null}
     {post.media?.length ? <MediaGrid media={post.media} copy={copy} onMediaOpen={index => onMediaOpen(post, index)} /> : null}
     {post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}
     <DetailMeta createdAt={post.createdAt} viewCount={post.viewCount} locale={locale} />

@@ -733,7 +733,7 @@ button:disabled:hover {
   display: flex;
   gap: 11px;
   min-width: 0;
-  padding: 12px 0 12px;
+  padding: 12px 0 20px;
   color: inherit;
   text-decoration: none;
 }
@@ -783,8 +783,14 @@ button:disabled:hover {
 .post-mention {
   color: #76838d;
 }
+.post-hashtag {
+  color: #1d9bf0;
+}
 :root[data-theme="dark"] .post-mention {
   color: #71767b;
+}
+:root[data-theme="dark"] .post-hashtag {
+  color: #1d9bf0;
 }
 .post-link {
   color: #1d9bf0;
@@ -1088,6 +1094,30 @@ button:disabled:hover {
   word-break: break-word;
   line-height: 1.35;
   font-size: 15px;
+}
+.post-text-collapsed {
+  display: -webkit-box;
+  max-height: 13.5em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+}
+.post-show-more {
+  display: block;
+  margin: 2px 0 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d9bf0;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.post-show-more:hover {
+  text-decoration: underline;
+}
+:root[data-theme="dark"] .post-show-more {
+  color: #1d9bf0;
 }
 .reply-to-notice {
   margin: 1px 0 2px;
@@ -3980,6 +4010,15 @@ button:disabled:hover {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
+.detail-scrim {
+  position: fixed;
+  z-index: 49;
+  inset: 0;
+  background: #eef3f4;
+}
+:root[data-theme="dark"] .detail-scrim {
+  background: #0f1419;
+}
 .detail::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
@@ -4425,6 +4464,15 @@ button:disabled:hover {
     height: 100vh;
     overflow: hidden;
   }
+  /* サイドバーは本文のスクロール位置を引き継がず、常に画面内に固定する */
+  .desktop-nav .drawer-inner {
+    position: fixed;
+    top: 20px;
+    left: calc(50% - 440px);
+    width: 248px;
+    height: calc(100vh - 40px);
+    max-height: none;
+  }
   .phone-frame {
     width: 620px;
     box-shadow: 0 0 30px rgba(0, 0, 0, 0.04);
@@ -4508,6 +4556,23 @@ button:disabled:hover {
   html {
     overflow-y: scroll;
     scrollbar-gutter: stable;
+  }
+  /* 詳細表示中にスクロールバーを隠しても、本文の幅を変えない */
+  body.detail-scrollbar-hidden {
+    padding-right: var(--detail-scrollbar-width, 0px);
+  }
+  /* 予約したスクロールバー幅を考慮して、詳細画面の位置を固定する */
+  body.detail-scrollbar-hidden .detail {
+    left: calc(50% + 150px - var(--detail-scrollbar-width, 0px) / 2);
+  }
+  /* PCではサイドバーを背面レイヤーで覆わない */
+  body.detail-scrollbar-hidden .detail-scrim {
+    left: calc(50% - 160px - var(--detail-scrollbar-width, 0px) / 2);
+    right: auto;
+    width: 620px;
+  }
+  body.detail-scrollbar-hidden .desktop-nav .drawer-inner {
+    left: calc(50% - 440px - var(--detail-scrollbar-width, 0px) / 2);
   }
 }
 
