@@ -49,6 +49,7 @@ const bookmarksKey = 'x-archive-bookmarks'
 const settingsKey = 'x-archive-settings'
 const timelineTabsKey = 'x-archive-timeline-tabs'
 const detailStateKey = 'x-archive-detail'
+const detailUrlParam = 'id'
 const publicBase = import.meta.env.BASE_URL
 const buttonIconBase = `${publicBase}assets/button/`
 const postIconBase = `${publicBase}assets/post/`
@@ -62,6 +63,17 @@ const timelinePageSize = 80
 const largeCollectionPostLimit = 2000
 const storedSourceTextLimit = 1_000_000
 const modalAnimationMs = 150
+
+const updateDetailUrl = (postId: string | null, mode: 'push' | 'replace' = 'replace', mediaIndex?: number, mediaParam: 'photo' | 'movie' = 'photo') => {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (postId) url.searchParams.set(detailUrlParam, postId)
+  else url.searchParams.delete(detailUrlParam)
+  url.searchParams.delete('photo')
+  url.searchParams.delete('movie')
+  if (mediaIndex !== undefined) url.searchParams.set(mediaParam, String(Math.max(0, mediaIndex)))
+  window.history[`${mode}State`]({}, '', `${url.pathname}${url.search}${url.hash}`)
+}
 
 const load = <T,>(key: string, fallback: T): T => {
   try { return JSON.parse(localStorage.getItem(key) || '') as T } catch { return fallback }
@@ -1091,7 +1103,35 @@ function App() {
     if (!collections.length) {
       detailHydrated.current = true
       localStorage.removeItem(detailStateKey)
+      updateDetailUrl(null)
       return
+    }
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlPostId = urlParams.get(detailUrlParam)
+    const requestedMediaParam: 'photo' | 'movie' | null = urlParams.has('movie') ? 'movie' : urlParams.has('photo') ? 'photo' : null
+    const mediaParamValue = Number.parseInt(urlParams.get(requestedMediaParam || 'photo') || '0', 10)
+    const mediaIndex = Number.isFinite(mediaParamValue) ? Math.max(0, mediaParamValue) : 0
+    if (urlPostId) {
+      const urlCollection = collections.find(item => item.posts.some(post => post.id === urlPostId))
+      const urlPost = urlCollection?.posts.find(post => post.id === urlPostId)
+      if (urlCollection && urlPost) {
+        setActiveId(urlCollection.id)
+        setView('timeline')
+        setDetailCollectionId(urlCollection.id)
+        const mediaItems = displayMediaItems(urlPost.media || [])
+        const targetMedia = mediaItems.length ? mediaItems[Math.min(mediaIndex, mediaItems.length - 1)] : undefined
+        const actualMediaParam: 'photo' | 'movie' | null = targetMedia ? (isVideoMedia(targetMedia) ? 'movie' : 'photo') : null
+        if (requestedMediaParam && targetMedia && requestedMediaParam === actualMediaParam) {
+          setMediaViewer({ post: urlPost, collection: urlCollection, index: Math.min(mediaIndex, mediaItems.length - 1) })
+          detailHydrated.current = true
+          return
+        }
+        if (requestedMediaParam) updateDetailUrl(urlPost.id)
+        setDetail(urlPost)
+        detailHydrated.current = true
+        return
+      }
+      updateDetailUrl(null)
     }
     const saved = load<{ collectionId?: string; postId?: string } | null>(detailStateKey, null)
     if (!saved?.postId) {
@@ -1111,6 +1151,41 @@ function App() {
     setDetail(post)
     detailHydrated.current = true
   }, [collections, detail, mediaViewer])
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const postId = urlParams.get(detailUrlParam)
+      const requestedMediaParam: 'photo' | 'movie' | null = urlParams.has('movie') ? 'movie' : urlParams.has('photo') ? 'photo' : null
+      const parsedMediaIndex = Number.parseInt(urlParams.get(requestedMediaParam || 'photo') || '0', 10)
+      const mediaIndex = Number.isFinite(parsedMediaIndex) ? Math.max(0, parsedMediaIndex) : 0
+      if (!postId) {
+        localStorage.removeItem(detailStateKey)
+        setDetail(null)
+        setDetailCollectionId(null)
+        setMediaViewer(null)
+        return
+      }
+      const collection = collections.find(item => item.posts.some(post => post.id === postId))
+      const post = collection?.posts.find(item => item.id === postId)
+      if (!collection || !post) return
+      setActiveId(collection.id)
+      setView('timeline')
+      setDetailCollectionId(collection.id)
+      const mediaItems = displayMediaItems(post.media || [])
+      const targetMedia = mediaItems.length ? mediaItems[Math.min(mediaIndex, mediaItems.length - 1)] : undefined
+      const actualMediaParam: 'photo' | 'movie' | null = targetMedia ? (isVideoMedia(targetMedia) ? 'movie' : 'photo') : null
+      if (requestedMediaParam && targetMedia && requestedMediaParam === actualMediaParam) {
+        setDetail(null)
+        setMediaViewer({ post, collection, index: Math.min(mediaIndex, mediaItems.length - 1) })
+      } else {
+        if (requestedMediaParam) updateDetailUrl(post.id)
+        setMediaViewer(null)
+        setDetail(post)
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [collections])
   useEffect(() => {
     saveJson(settingsKey, { theme, language, font })
     const resolvedTheme = theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme
@@ -1134,12 +1209,16 @@ function App() {
 
   const closeDetail = useCallback(() => {
     localStorage.removeItem(detailStateKey)
+    updateDetailUrl(null)
     setDetail(null)
     setDetailCollectionId(null)
   }, [])
   const openDetail = useCallback((post: Post, collection?: Collection) => {
     const collectionId = collection?.id ?? active?.id ?? null
     if (collectionId) setDetailCollectionId(collectionId)
+    const currentParams = new URLSearchParams(window.location.search)
+    const currentPostId = currentParams.get(detailUrlParam)
+    if (currentPostId !== post.id || currentParams.has('photo') || currentParams.has('movie')) updateDetailUrl(post.id, 'push')
     setDetail(post)
   }, [active?.id])
   const select = (collection: Collection) => { setActiveId(collection.id); setView('timeline'); closeDetail(); setQuery(''); setSearchDraft(''); setAdvancedSearchOpen(false); setDrawer(false); scrollPageTop() }
@@ -1264,6 +1343,39 @@ function App() {
     : title
   const hasSearchableData = allPosts.length > 0
   const searchableView = hasSearchableData && (view === 'timeline' || view === 'bookmarks')
+  useEffect(() => {
+    const currentParams = new URLSearchParams(window.location.search)
+    const currentPostId = currentParams.get(detailUrlParam)
+    const currentMediaParam = currentParams.has('movie') ? 'movie' : currentParams.has('photo') ? 'photo' : null
+    if (mediaViewer) {
+      const nextPhoto = String(Math.max(0, mediaViewer.index))
+      const mediaItems = displayMediaItems(mediaViewer.post.media || [])
+      const currentMedia = mediaItems[Math.min(Math.max(mediaViewer.index, 0), Math.max(mediaItems.length - 1, 0))]
+      const mediaParam: 'photo' | 'movie' = currentMedia && isVideoMedia(currentMedia) ? 'movie' : 'photo'
+      if (currentPostId !== mediaViewer.post.id || currentMediaParam !== mediaParam) updateDetailUrl(mediaViewer.post.id, 'push', mediaViewer.index, mediaParam)
+      else if (currentParams.get(mediaParam) !== nextPhoto) updateDetailUrl(mediaViewer.post.id, 'replace', mediaViewer.index, mediaParam)
+      return
+    }
+    // 画像詳細だけを閉じた場合は、投稿詳細用のパラメータも残さない。
+    if (!detail && currentPostId) updateDetailUrl(null)
+    if (!mediaViewer) {
+      const currentParams = new URLSearchParams(window.location.search)
+      if (detail) {
+        if (currentParams.has('photo') || currentParams.has('movie')) updateDetailUrl(detail.id)
+      } else if (currentPostId) {
+        updateDetailUrl(null)
+      }
+    }
+  }, [detail, mediaViewer])
+  useEffect(() => {
+    const handleQuotedMediaOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ post?: Post; index?: number }>).detail
+      if (!detail?.post) return
+      setMediaViewer({ post: detail.post, index: detail.index ?? 0 })
+    }
+    window.addEventListener('twview-open-media', handleQuotedMediaOpen)
+    return () => window.removeEventListener('twview-open-media', handleQuotedMediaOpen)
+  }, [])
   const closeMediaViewer = () => {
     const compactMediaViewer = window.matchMedia('(max-width: 900px)').matches
     if (mediaViewer && compactMediaViewer) {
@@ -1334,20 +1446,22 @@ function PostShareIcon() {
   return <span className="post-image-icon share-image-icon" aria-hidden="true"><img className="icon-default" src={`${postIconBase}share.svg`} alt="" /><img className="icon-hover" src={`${postIconBase}share_ho.svg`} alt="" /></span>
 }
 
-function MediaGrid({ media, copy, className = '', onMediaOpen }: { media: Media[]; copy: Copy; className?: string; onMediaOpen?: (index: number) => void }) {
+function MediaGrid({ media, copy, className = '', postUrl, onMediaOpen }: { media: Media[]; copy: Copy; className?: string; postUrl?: string; onMediaOpen?: (index: number) => void }) {
   const items = displayMediaItems(media)
-  return <div className={`media-grid ${className}`.trim()}>{items.slice(0, 4).map((m, i) => <MediaItem key={`${m.url}-${i}`} media={m} copy={copy} index={i} onMediaOpen={onMediaOpen} />)}</div>
+  return <div className={`media-grid ${className}`.trim()}>{items.slice(0, 4).map((m, i) => <MediaItem key={`${m.url}-${i}`} media={m} copy={copy} index={i} postUrl={postUrl} onMediaOpen={onMediaOpen} />)}</div>
 }
 const videoMimeType = (url: string) => /\.webm(?:[?#].*)?$/i.test(url) ? 'video/webm' : /\.mov(?:[?#].*)?$/i.test(url) ? 'video/quicktime' : /\.m3u8(?:[?#].*)?$/i.test(url) ? 'application/x-mpegURL' : 'video/mp4'
-function MediaItem({ media, copy, index, onMediaOpen }: { media: Media; copy: Copy; index: number; onMediaOpen?: (index: number) => void }) {
+function MediaItem({ media, copy, index, postUrl, onMediaOpen }: { media: Media; copy: Copy; index: number; postUrl?: string; onMediaOpen?: (index: number) => void }) {
   const [videoFailed, setVideoFailed] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
   const imageFallback = <span className="media-fallback-content"><Image size={28} strokeWidth={1.8} /><span>メディアを表示できません</span></span>
   if (isVideoMedia(media) && videoFailed) {
     const content = media.posterUrl ? <img src={media.posterUrl} alt={copy.mediaAlt} /> : <span className="video-fallback-text">{copy.detail.open}</span>
-    return onMediaOpen
-      ? <button type="button" className="media-item media-open-button video-fallback" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{content}</button>
-      : <a className="media-item video-fallback" href={media.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{content}</a>
+    return postUrl
+      ? <a className="media-item video-fallback" href={postUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{content}</a>
+      : onMediaOpen
+        ? <button type="button" className="media-item media-open-button video-fallback" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{content}</button>
+        : <a className="media-item video-fallback" href={media.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{content}</a>
   }
   if (isVideoMedia(media)) return <span className="media-item video-media" onClick={e => e.stopPropagation()}><video poster={media.posterUrl} controls preload="auto" playsInline onError={() => setVideoFailed(true)}><source src={media.url} type={videoMimeType(media.url)} /><a href={media.url} target="_blank" rel="noreferrer">{copy.detail.open}</a></video></span>
   if (imageFailed && onMediaOpen) return <button type="button" className="media-item media-open-button media-fallback" onClick={e => { e.stopPropagation(); onMediaOpen(index) }}>{imageFallback}</button>
@@ -1384,9 +1498,9 @@ function MediaViewer({ state, copy, locale, bookmarked, onClose, onBookmark, onC
       {index > 0 && <button className="media-viewer-nav prev" onClick={() => onNavigate(index - 1)} aria-label={copy.detail.back}><ChevronLeft size={30} /></button>}
       {isVideoMedia(current)
         ? viewerVideoFailed
-          ? current.posterUrl
-            ? <img className="media-viewer-media" src={current.posterUrl} alt={copy.mediaAlt} />
-            : <a className="media-viewer-fallback" href={current.url} target="_blank" rel="noreferrer">{copy.detail.open}</a>
+          ? <a className="media-viewer-fallback" href={url || current.url} target="_blank" rel="noreferrer">
+              {current.posterUrl ? <img className="media-viewer-media" src={current.posterUrl} alt={copy.mediaAlt} /> : copy.detail.open}
+            </a>
           : <video className="media-viewer-media" poster={current.posterUrl} controls autoPlay playsInline onError={() => setViewerVideoFailed(true)}><source src={current.url} type={videoMimeType(current.url)} /></video>
         : <img className="media-viewer-media" src={current.url} alt={copy.mediaAlt} />}
       {index < media.length - 1 && <button className="media-viewer-nav next" onClick={() => onNavigate(index + 1)} aria-label={copy.detail.open}><ChevronLeft size={30} /></button>}
@@ -1421,8 +1535,27 @@ function MediaViewer({ state, copy, locale, bookmarked, onClose, onBookmark, onC
   </div>
 }
 
-function QuotedPostCard({ post, copy, locale, avatarUrl, linkedPost, onDetail }: { post: EmbeddedPost; copy: Copy; locale: string; avatarUrl?: string; linkedPost?: Post; onDetail?: (post: Post) => void }) {
+function QuotedPostCard({ post, copy, locale, avatarUrl, linkedPost, onDetail, onMediaOpen }: { post: EmbeddedPost; copy: Copy; locale: string; avatarUrl?: string; linkedPost?: Post; onDetail?: (post: Post) => void; onMediaOpen?: (post: Post, index: number) => void }) {
   const username = post.username?.replace(/^@/, '')
+  const generatedPostId = useRef(createId('quoted')).current
+  const mediaPost: Post = linkedPost || {
+    id: post.id || idFromPostUrl(post.postUrl || '')?.[2] || generatedPostId,
+    text: post.text || '',
+    createdAt: post.createdAt || '',
+    authorName: post.authorName,
+    username,
+    postUrl: post.postUrl,
+    media: post.media
+  }
+  if (post.media?.length) {
+    const openQuoteMedia = (index: number) => {
+      if (onMediaOpen) onMediaOpen(mediaPost, index)
+      else window.dispatchEvent(new CustomEvent('twview-open-media', { detail: { post: mediaPost, index } }))
+    }
+    const mediaContent = <><div className="quote-card-header"><div className="quote-avatar" onClick={e => { e.preventDefault(); e.stopPropagation() }}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><b>{post.authorName || username || copy.unknownAuthor}</b>{username && <span>@{username}</span>}{post.createdAt && <span>ﾂｷ {dateText(post.createdAt, locale)}</span>}</div>{post.text && <p>{renderPostText(post.text)}</p>}<MediaGrid media={post.media} copy={copy} className="quote-media-grid" postUrl={postCanonicalUrl(mediaPost, username)} onMediaOpen={openQuoteMedia} /></>
+    if (linkedPost && onDetail) return <div role="button" tabIndex={0} className="quote-card quote-card-button" onClick={e => { e.stopPropagation(); onDetail(linkedPost) }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onDetail(linkedPost) } }}>{mediaContent}</div>
+    return post.postUrl ? <a className="quote-card" href={post.postUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{mediaContent}</a> : <div className="quote-card">{mediaContent}</div>
+  }
   const content = <><div className="quote-card-header"><div className="quote-avatar" onClick={e => { e.preventDefault(); e.stopPropagation() }}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><b>{post.authorName || username || copy.unknownAuthor}</b>{username && <span>@{username}</span>}{post.createdAt && <span>· {dateText(post.createdAt, locale)}</span>}</div>{post.text && <p>{renderPostText(post.text)}</p>}{post.media?.length ? <MediaGrid media={post.media} copy={copy} className="quote-media-grid" /> : null}</>
   if (linkedPost && onDetail) return <div role="button" tabIndex={0} className="quote-card quote-card-button" onClick={e => { e.stopPropagation(); onDetail(linkedPost) }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onDetail(linkedPost) } }}>{content}</div>
   return post.postUrl ? <a className="quote-card" href={post.postUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{content}</a> : <div className="quote-card">{content}</div>
@@ -1838,7 +1971,7 @@ function ExpandablePostText({ text, urls }: { text: string; urls?: string[] }) {
   const [expanded, setExpanded] = useState(false)
   const value = displayPostText(text)
   const lineCount = value.split(/\r?\n/).length
-  const expandable = Array.from(value).length > 140 || lineCount > 11
+  const expandable = Array.from(value).length > 140 && lineCount > 11
   return <>
     <p className={expandable && !expanded ? 'post-text-collapsed' : undefined}>{renderPostText(text, urls)}</p>
     {expandable && !expanded && <button className="post-show-more" type="button" onClick={event => { event.stopPropagation(); setExpanded(true) }}>さらに表示</button>}
@@ -1859,7 +1992,7 @@ function PostCard({ post, collection, copy, locale, avatarUrl, fallbackDisplayNa
   const replyMentionPrefix = replyingTo ? `@${replyingTo.replace(/^@/, '').toLowerCase()}` : ''
   const textHasReplyMention = Boolean(replyMentionPrefix && visibleText.trimStart().toLowerCase().startsWith(replyMentionPrefix))
   const showReplyNotice = Boolean(replyingTo && !textHasReplyMention)
-  const currentPost = <div className="reply-child-row"><div className="avatar" onClick={e => e.stopPropagation()}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><div className="post-body"><div className="post-top"><b>{authorName}</b>{username && <span>@{username.replace(/^@/, '')}</span>}<span>· {dateText(post.createdAt, locale)}</span><PostMoreMenu post={post} copy={copy} fallbackUsername={username} onCopy={onCopy} /></div>{showReplyNotice && <ReplyToNotice username={replyingTo!} locale={locale} />}{visibleText && <ExpandablePostText text={visibleText} urls={visibleUrls} />}{visibleHashtags.length ? <div className="hashtags">{visibleHashtags.map(h => <span key={h}>#{h.replace(/^#/, '')}</span>)}</div> : null}{article ? <ArticleCard post={post} /> : post.media?.length ? <MediaGrid media={post.media} copy={copy} onMediaOpen={index => onMediaOpen(post, index)} /> : null}{post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}<div className="post-actions"><span><PostActionIcon name="reply" /> {compactNonZero(post.replyCount, locale)}</span><span><PostActionIcon name="retweet" /> {compactNonZero(post.repostCount, locale)}</span><span><PostActionIcon name="like" /> {compactNonZero(post.likeCount, locale)}</span><span><PostActionIcon name="impression" /> {compact(post.viewCount, locale)}</span><button onClick={e => { e.stopPropagation(); onBookmark(post) }} className={bookmarked ? 'marked' : ''} aria-label={copy.nav.bookmarks}><PostBookmarkIcon marked={bookmarked} /></button></div></div></div>
+  const currentPost = <div className="reply-child-row"><div className="avatar" onClick={e => e.stopPropagation()}><img src={profileIconSrc(avatarUrl)} alt="" onError={e => useDefaultProfileIcon(e.currentTarget)} /></div><div className="post-body"><div className="post-top"><b>{authorName}</b>{username && <span>@{username.replace(/^@/, '')}</span>}<span>· {dateText(post.createdAt, locale)}</span><PostMoreMenu post={post} copy={copy} fallbackUsername={username} onCopy={onCopy} /></div>{showReplyNotice && <ReplyToNotice username={replyingTo!} locale={locale} />}{visibleText && <ExpandablePostText text={visibleText} urls={visibleUrls} />}{visibleHashtags.length ? <div className="hashtags">{visibleHashtags.map(h => <span key={h}>#{h.replace(/^#/, '')}</span>)}</div> : null}{article ? <ArticleCard post={post} /> : post.media?.length ? <MediaGrid media={post.media} copy={copy} postUrl={postCanonicalUrl(post, username || fallbackUsername)} onMediaOpen={index => onMediaOpen(post, index)} /> : null}{post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}<div className="post-actions"><span><PostActionIcon name="reply" /> {compactNonZero(post.replyCount, locale)}</span><span><PostActionIcon name="retweet" /> {compactNonZero(post.repostCount, locale)}</span><span><PostActionIcon name="like" /> {compactNonZero(post.likeCount, locale)}</span><span><PostActionIcon name="impression" /> {compact(post.viewCount, locale)}</span><button onClick={e => { e.stopPropagation(); onBookmark(post) }} className={bookmarked ? 'marked' : ''} aria-label={copy.nav.bookmarks}><PostBookmarkIcon marked={bookmarked} /></button></div></div></div>
   return <article className={`post ${post.repliedPost ? 'thread-post' : ''}`} onClick={() => onDetail(post)}>{post.repliedPost && <ReplyParentPost post={post.repliedPost} copy={copy} locale={locale} avatarUrl={parentAvatarUrl} />}{currentPost}</article>
 }
 
@@ -1891,11 +2024,25 @@ function ImportView({ copy, onImport, onBack, onMenu }: { copy: Copy; onImport: 
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const pick = (f?: File) => { if (f) { setFile(f); setError('') } }
+  const pick = (f?: File) => {
+    if (!f) return
+    setFile(f)
+    setError('')
+    // ファイル内容を先に解析し、共通ハッシュタグを含む検索データは
+    // キーワードとして扱う。解析に失敗した場合は従来どおりアカウントを初期値にする。
+    void f.text()
+      .then(sourceText => importText(sourceText, f.name))
+      .then(result => setKind(result.collection.type === 'account' ? 'account' : 'keyword'))
+      .catch(() => setKind('account'))
+  }
+  useEffect(() => {
+    const select = document.querySelector<HTMLSelectElement>('.import-options select')
+    select?.querySelector('option[value="hashtag"]')?.remove()
+  }, [file, kind])
   const submit = async () => {
     if (!file) return
     setLoading(true)
-    try { await onImport(file, kind, title) }
+    try { await onImport(file, kind === 'hashtag' ? 'keyword' : kind, title) }
     catch (e) { setError(e instanceof Error ? e.message : copy.import.failure) }
     finally { setLoading(false) }
   }
@@ -2275,7 +2422,7 @@ function DetailPost({ post, collection, copy, locale, avatarUrl, fallbackDisplay
     {replyingTo && <ReplyToNotice username={replyingTo} locale={locale} />}
     <p className="detail-post-text">{renderPostText(post.text, post.urls)}</p>
 {visibleHashtags.length ? <div className="hashtags">{visibleHashtags.map(h => <span key={h}>#{h.replace(/^#/, '')}</span>)}</div> : null}
-    {post.media?.length ? <MediaGrid media={post.media} copy={copy} onMediaOpen={index => onMediaOpen(post, index)} /> : null}
+    {post.media?.length ? <MediaGrid media={post.media} copy={copy} postUrl={url} onMediaOpen={index => onMediaOpen(post, index)} /> : null}
     {post.quotedPost && <QuotedPostCard post={post.quotedPost} copy={copy} locale={locale} avatarUrl={quoteAvatarUrl} linkedPost={quotedLinkedPost} onDetail={onDetail} />}
     <DetailMeta createdAt={post.createdAt} viewCount={post.viewCount} locale={locale} />
     <div className="detail-actions">

@@ -72,6 +72,7 @@ const followingKeys = ['Following_Count', 'Following', 'following_count', 'follo
 type SourceKind = 'octoparse' | 'twexportly' | 'twsearchexport' | 'twibot' | 'twispo' | 'xporter'
 const handle = (value: string) => value.trim().replace(/^@/, '')
 const statusIdFromUrl = (value: string) => /\/status\/(\d+)/.exec(value)?.[1] ?? ''
+const resolvedPostId = (value: string, postUrl = '', prefix = 'post') => id(value) || statusIdFromUrl(postUrl) || createId(prefix)
 const mediaKind = (value: string) => /video|動画|mp4|mov|webm|m3u8/i.test(value) ? 'video' : 'image'
 const mediaFrom = (urlValue: string, typeValue = ''): Media[] => {
   const typeFromValue = typeValue ? mediaKind(typeValue) : ''
@@ -91,30 +92,32 @@ const twSearchPostUrl = (row: Row) => {
   return postId && username ? `https://x.com/${username}/status/${postId}` : ''
 }
 function fromOctoparse(row: Row): Post {
-  const postId = id(text(row, 'Tweet_ID'))
+  const postUrl = formatUrl(row)
+  const postId = resolvedPostId(text(row, 'Tweet_ID'), postUrl)
   const tweetText = contentText(row, 'Tweet_Content')
   return {
     id: postId, text: tweetText, createdAt: normalizeDate(text(row, 'Posted_Time')),
     authorId: id(text(row, 'UserID')), authorName: text(row, 'User_Name'),
     username: text(row, 'User_Handle') || text(row, 'Account_URL').split('/').filter(Boolean).pop(),
     authorAvatarUrl: avatarKeys.map(key => text(row, key)).find(Boolean),
-    postUrl: formatUrl(row), replyCount: number(text(row, 'Replies_Count')), repostCount: number(text(row, 'Reposts_Count')),
+    replyCount: number(text(row, 'Replies_Count')), repostCount: number(text(row, 'Reposts_Count')),
     likeCount: number(text(row, 'Likes_Count')), viewCount: number(text(row, 'Views_Count')),
     quoteCount: number(text(row, 'Quote_Count')), sourceBookmarkCount: number(text(row, 'Bookmark_Count')),
-    type: text(row, 'Is_Quote_Status').toLowerCase() === 'true' ? 'quote' : typeFromText(tweetText), raw: row
+    type: text(row, 'Is_Quote_Status').toLowerCase() === 'true' ? 'quote' : typeFromText(tweetText), postUrl, raw: row
   }
 }
 function fromTwExportly(row: Row): Post {
   const mediaUrls = mediaValues(text(row, 'media_urls'))
   const media: Media[] = mediaUrls.map(url => ({ url, type: text(row, 'media_type') || undefined }))
   const tweetText = contentText(row, 'text')
+  const postUrl = text(row, 'tweet_url') || text(row, 'Tweet_URL') || text(row, 'url')
   return {
-    id: id(text(row, 'tweet_id')), text: tweetText, createdAt: normalizeDate(text(row, 'created_at')),
+    id: resolvedPostId(text(row, 'tweet_id'), postUrl), text: tweetText, createdAt: normalizeDate(text(row, 'created_at')),
     authorName: authorNameKeys.map(key => text(row, key)).find(Boolean),
     username: usernameKeys.map(key => text(row, key)).find(Boolean),
     authorAvatarUrl: avatarKeys.map(key => text(row, key)).find(Boolean),
     language: text(row, 'language'), type: resolvedPostType(text(row, 'type'), tweetText), hashtags: values(text(row, 'hashtags')).map(v => v.replace(/^#/, '')),
-    urls: values(text(row, 'urls')), media: media.length ? media : undefined, client: text(row, 'client'),
+    urls: values(text(row, 'urls')), media: media.length ? media : undefined, client: text(row, 'client'), postUrl: postUrl || undefined,
     replyCount: number(text(row, 'reply_count')), repostCount: number(text(row, 'retweet_count')),
     likeCount: number(text(row, 'favorite_count')), viewCount: number(text(row, 'view_count')),
     sourceBookmarkCount: number(text(row, 'bookmark_count')), raw: row
@@ -126,7 +129,7 @@ function fromTwSearchExport(row: Row): Post {
   const media = [...imageMedia, ...videoMedia]
   const tweetText = contentText(row, 'TweetText')
   return {
-    id: id(text(row, 'ID')), text: tweetText, createdAt: normalizeDate(text(row, 'TweetCreateTime')),
+    id: resolvedPostId(text(row, 'ID'), twSearchPostUrl(row)), text: tweetText, createdAt: normalizeDate(text(row, 'TweetCreateTime')),
     authorName: text(row, 'Name'), username: handle(text(row, 'Handle')), authorAvatarUrl: text(row, 'AvatarURL'),
     postUrl: twSearchPostUrl(row), hashtags: values(text(row, 'Hashtags')).map(v => v.replace(/^#/, '')),
     urls: values(text(row, 'TweetURL')), media: media.length ? media : undefined, type: typeFromText(tweetText),
@@ -201,7 +204,7 @@ const xApiEmbeddedPost = (tweet: JsonObject | undefined, usersById: Map<string, 
   const media = xApiMedia(tweet, mediaByKey)
   const metrics = xApiMetrics(tweet)
   return {
-    id: postId,
+    id: postId || createId('embedded'),
     text: jsonString(tweet.text),
     createdAt: normalizeDate(jsonString(tweet.created_at)),
     authorName: author ? jsonString(author.name) : '',
@@ -227,7 +230,7 @@ const xApiPost = (tweet: JsonObject, usersById: Map<string, JsonObject>, tweetsB
   const repliedTweet = repliedRef ? tweetsById.get(jsonString(repliedRef.id)) : undefined
   const quotedTweet = quotedRef ? tweetsById.get(jsonString(quotedRef.id)) : undefined
   return {
-    id: postId,
+    id: postId || createId('post'),
     text: jsonString(tweet.text),
     createdAt: normalizeDate(jsonString(tweet.created_at)),
     authorId: jsonString(tweet.author_id),
@@ -262,7 +265,11 @@ const buildXApiCollection = (json: unknown, filename: string): ImportResult => {
   const posts = tweets.map(tweet => xApiPost(tweet, usersById, tweetsById, mediaByKey)).filter(post => post.id && post.text).sort((a, b) => dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt))
   if (!posts.length) throw new Error('有効なツイートを読み込めませんでした。')
   const usernames = new Set(posts.map(post => handle(post.username || '')).filter(Boolean))
-  const type: CollectionType = usernames.size <= 1 ? 'account' : 'keyword'
+  const normalizedTags = (post: Post) => new Set((post.hashtags || []).map(tag => tag.trim().replace(/^#/, '').toLocaleLowerCase()).filter(Boolean))
+  const commonHashtag = posts.length > 1
+    ? [...normalizedTags(posts[0])].find(tag => posts.every(post => normalizedTags(post).has(tag))) || ''
+    : ''
+  const type: CollectionType = commonHashtag || usernames.size > 1 ? 'keyword' : 'account'
   const firstPost = posts[0]
   const firstUser = usersById.get(firstPost.authorId || '')
   const profile: Profile | undefined = type === 'account' ? {
@@ -276,10 +283,10 @@ const buildXApiCollection = (json: unknown, filename: string): ImportResult => {
     followersCount: firstUser && isObject(firstUser.public_metrics) ? jsonNumber(firstUser.public_metrics.followers_count) : undefined,
     followingCount: firstUser && isObject(firstUser.public_metrics) ? jsonNumber(firstUser.public_metrics.following_count) : undefined
   } : undefined
-  const title = type === 'account' ? (profile?.displayName || (firstPost.username ? `@${firstPost.username}` : 'X API')) : 'X API'
+  const title = commonHashtag ? `#${commonHashtag}` : type === 'account' ? (profile?.displayName || (firstPost.username ? `@${firstPost.username}` : 'X API')) : 'X API'
   return {
     collection: {
-      id: createId('collection'), type, title, query: firstPost.username || title, posts, accountProfile: profile,
+      id: createId('collection'), type, title, query: commonHashtag ? `#${commonHashtag}` : firstPost.username || title, posts, accountProfile: profile,
       sourceName: filename, sourceFormat: 'JSON', importedAt: new Date().toISOString()
     },
     source: 'X API JSON',
@@ -295,7 +302,7 @@ function fromTwiBot(row: Row): Post {
     ...videoUrls.map(url => ({ url, type: 'video' }))
   ]
   return {
-    id: id(text(row, 'id')), text: tweetText, createdAt: normalizeDate(text(row, 'createdAt')),
+    id: resolvedPostId(text(row, 'id'), text(row, 'tweetURL')), text: tweetText, createdAt: normalizeDate(text(row, 'createdAt')),
     authorName: text(row, 'tweetAuthor'), username: handle(text(row, 'handle')), postUrl: text(row, 'tweetURL'),
     type: resolvedPostType(text(row, 'type'), tweetText), hashtags: values(text(row, 'hashtags')).map(v => v.replace(/^#/, '')),
     replyCount: number(text(row, 'replyCount')), repostCount: number(text(row, 'retweetCount')),
@@ -308,7 +315,7 @@ function fromTwispo(row: Row): Post {
   const postUrl = text(row, 'URL')
   const tweetText = contentText(row, 'テキスト')
   return {
-    id: id(statusIdFromUrl(postUrl) || postUrl || `${text(row, '@')}-${text(row, '投稿日時')}-${tweetText}`),
+    id: resolvedPostId('', postUrl, 'post'),
     text: tweetText, createdAt: normalizeDate(text(row, '投稿日時')),
     authorName: text(row, '名前'), username: handle(text(row, '@')), postUrl,
     client: text(row, '投稿アプリ'), type: typeFromText(tweetText),
@@ -324,7 +331,7 @@ const xporterEmbeddedPost = (row: Row, prefix: string): EmbeddedPost | undefined
   if (!postId && !tweetText && !postUrl) return undefined
   const media = mediaFrom(text(row, `${prefix}: メディアURL`), text(row, `${prefix}: メディア種類`))
   return {
-    id: postId || statusIdFromUrl(postUrl), text: tweetText, createdAt: normalizeDate(text(row, `${prefix}: 日付`)),
+    id: resolvedPostId(postId, postUrl, 'embedded'), text: tweetText, createdAt: normalizeDate(text(row, `${prefix}: 日付`)),
     authorName: text(row, `${prefix}: 投稿者名`), username: handle(text(row, `${prefix}: 投稿者ユーザー名`)),
     postUrl, type: resolvedPostType(text(row, `${prefix}: 種類`), tweetText),
     replyCount: number(text(row, `${prefix}: 返信数`)), repostCount: number(text(row, `${prefix}: リポスト数`)),
@@ -345,7 +352,7 @@ function fromXPorter(row: Row): Post {
   const replyToPostId = id(text(row, '返信先の投稿 ID'))
   const replyToUsername = handle(text(row, '返信先ユーザー名'))
   return {
-    id: id(text(row, 'ID') || statusIdFromUrl(postUrl) || `${text(row, '投稿者ユーザー名')}-${text(row, '日付')}-${tweetText}`),
+    id: resolvedPostId(text(row, 'ID'), postUrl),
     text: tweetText, createdAt: normalizeDate(text(row, '日付')), postUrl,
     language: text(row, '言語'), type: quotedPost ? 'quote' : resolvedPostType(text(row, '種類'), tweetText),
     authorName: text(row, '投稿者名'), username: handle(text(row, '投稿者ユーザー名')),
@@ -392,6 +399,14 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
     catch { warnings.push(`${i + 1}行目を解析できませんでした`) }
   })
   const posts = [...unique.values()].sort((a, b) => dateTimestamp(b.createdAt) - dateTimestamp(a.createdAt))
+  const hashtagValues = (post: Post) => {
+    const structured = post.hashtags || []
+    const inline = [...post.text.matchAll(/#([^\s#]+)/g)].map(match => match[1])
+    return new Set([...structured, ...inline].map(value => value.trim().replace(/^#/, '').replace(/[.,!?。、，！？\]}）】」』]+$/, '').toLocaleLowerCase()).filter(Boolean))
+  }
+  const commonHashtag = posts.length > 1
+    ? [...hashtagValues(posts[0])].find(tag => posts.every(post => hashtagValues(post).has(tag))) || ''
+    : ''
   if (!posts.length) throw new Error('有効なツイートを読み込めませんでした。')
   const params: { from?: string; to?: string; account?: string; query?: string } = source === 'octoparse' ? parseParams(text(rows[0], 'input_params')) : {}
   const searchQuery = meta.query || params.query || firstOf(rows, [
@@ -399,7 +414,20 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
     'Search Keyword', 'Search keyword', 'Search Term', 'Search term', 'Keyword', 'keyword',
     'Keywords', 'keywords', 'Query', 'query', '検索キーワード', '検索語', '検索クエリ', '検索ワード', 'キーワード'
   ])
-  const type = source === 'twibot' && searchQuery?.startsWith('#') ? 'hashtag' : inferType(rows, source)
+  const hashtagQuery = firstOf(rows, [
+    'Hashtag_Query', 'HashtagQuery', 'Search_Hashtag', 'Search Hashtag', 'Hashtag Search',
+    'Hashtag', 'ハッシュタグ検索', '検索ハッシュタグ'
+  ])
+  const searchType = firstOf(rows, ['Search_Type', 'SearchType', 'Query_Type', 'Query Type', '検索タイプ']) || ''
+  const detectedQuery = searchQuery || hashtagQuery || (commonHashtag ? `#${commonHashtag}` : '')
+  const isHashtagQuery = Boolean(commonHashtag || hashtagQuery || /hashtag|ハッシュタグ/i.test(searchType) || /^(?:#|hashtag[:：\s]|ハッシュタグ[:：\s])/i.test(detectedQuery || ''))
+  // 検索結果とハッシュタグは同じキーワード検索として扱う。
+  // 全投稿に共通するハッシュタグがある場合は、そのタグをコレクション名にする。
+  const type = isHashtagQuery || detectedQuery
+    ? 'keyword'
+    : params.account
+      ? 'account'
+      : inferType(rows, source)
   const username = source === 'octoparse'
     ? handle(first(rows, 'User_Handle') || params.account?.split('/').filter(Boolean).pop() || '')
     : source === 'twsearchexport'
@@ -428,9 +456,9 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
     bio: first(rows, 'Bio'), website: first(rows, 'LinkInBio'), location: first(rows, 'Location'),
     followersCount: number(first(rows, 'FollowersCount') ?? ''), followingCount: number(first(rows, 'FollowingCount') ?? '')
   } : undefined
-  const fallback = searchQuery || (type === 'account' ? (username ? `@${username}` : '不明なアカウント') : '検索結果')
+  const fallback = detectedQuery || (type === 'account' ? (username ? `@${username}` : '不明なアカウント') : '検索結果')
   const collection: Collection = {
-    id: createId('collection'), type, title: fallback, query: type === 'account' ? username || fallback : searchQuery || fallback, posts, accountProfile: profile,
+    id: createId('collection'), type, title: fallback, query: type === 'account' ? username || fallback : detectedQuery || fallback, posts, accountProfile: profile,
     sourceName: filename, sourceFormat: format, importedAt: new Date().toISOString(), sourcePeriod: { from: params.from, to: params.to }
   }
   const sourceLabel = source === 'octoparse' ? 'Octoparse Twitter Scraper' : source === 'twsearchexport' ? 'TwSearchExport' : source === 'twibot' ? 'TwiBot' : source === 'twispo' ? 'ついすぽ -Tweet Export-' : source === 'xporter' ? 'XPorter' : 'TwExportly'
