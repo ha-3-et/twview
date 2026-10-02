@@ -37,7 +37,6 @@ html {
 html.detail-scrollbar-hidden,
 body.detail-scrollbar-hidden {
   overflow: hidden;
-  scrollbar-gutter: auto;
   scrollbar-width: none !important;
   -ms-overflow-style: none;
 }
@@ -852,17 +851,23 @@ button:disabled:hover {
 }
 .reply-parent-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Reserve the same bookmark column as .post-actions so the first four
+     metrics line up with the reply below. */
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 34px;
   align-items: center;
+  gap: 8px;
   padding-top: 8px;
   color: #536471;
   font-size: 13px;
 }
 .reply-parent-actions span {
   min-width: 0;
+  width: 100%;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
+  line-height: 1;
   white-space: nowrap;
 }
 .reply-parent-media {
@@ -1307,19 +1312,29 @@ button:disabled:hover {
 }
 .media-viewer-bottom-actions {
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 0;
   z-index: 2;
-  transform: translateX(-50%);
-  min-width: min(620px, 92%);
-  padding: 14px 28px 16px;
-  display: flex;
+  width: 100%;
+  min-width: 0;
+  padding: 14px max(28px, calc((100% - 620px) / 2)) 16px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 34px 34px;
   align-items: center;
-  justify-content: space-around;
-  gap: 24px;
+  gap: 8px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.74), rgba(0, 0, 0, 0));
   color: #fff;
   font-size: 14px;
+}
+.media-viewer-bottom-actions > span:not(.share-menu-wrap) {
+  width: 100%;
+  justify-content: flex-start;
+}
+.media-viewer-bottom-actions > button,
+.media-viewer-bottom-actions > .share-menu-wrap {
+  width: 34px;
+  justify-self: end;
 }
 .media-viewer-bottom-actions span,
 .media-viewer-bottom-actions a,
@@ -1529,13 +1544,26 @@ button:disabled:hover {
   grid-column: span 2;
 }
 .post-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 34px;
+  align-items: center;
   gap: 8px;
   color: #536471;
   font-size: 13px;
   height: 32px;
+  margin-top: 5px;
+}
+.post-actions > span,
+.post-actions > button {
+  align-self: center;
+  line-height: 1;
+}
+.post-actions > span {
+  width: 100%;
+  justify-content: flex-start;
+}
+.post-actions > button {
+  justify-self: end;
 }
 .post-actions span {
   min-width: 0;
@@ -1550,6 +1578,8 @@ button:disabled:hover {
 .post-image-icon {
   width: 18px;
   height: 18px;
+  position: relative;
+  top: 1px;
 }
 .post-image-icon {
   position: relative;
@@ -1614,9 +1644,6 @@ button:disabled:hover {
   border-radius: 999px;
   transition: color 0.2s ease;
   flex: 0 0 auto;
-}
-.post-actions button {
-  transform: translateY(7px);
 }
 .post-actions button::before {
   content: "";
@@ -4433,6 +4460,9 @@ button:disabled:hover {
     scrollbar-gutter: auto;
     overflow-x: hidden;
   }
+  html.detail-scrollbar-hidden {
+    scrollbar-gutter: auto;
+  }
   :root {
     background: #fff;
   }
@@ -4549,20 +4579,35 @@ button:disabled:hover {
 
   .post-actions button:hover .post-image-icon .icon-default,
   .detail-actions button:hover .post-image-icon .icon-default,
-  .detail-actions .share-action:not(.disabled):hover .post-image-icon .icon-default,
+  .detail-actions
+    .share-action:not(.disabled):hover
+    .post-image-icon
+    .icon-default,
   .media-viewer-side-actions button:hover .post-image-icon .icon-default,
-  .media-viewer-side-actions .share-action:not(.disabled):hover .post-image-icon .icon-default,
+  .media-viewer-side-actions
+    .share-action:not(.disabled):hover
+    .post-image-icon
+    .icon-default,
   .post-actions button:hover .post-image-icon.marked-icon .icon-default,
   .detail-actions button:hover .post-image-icon.marked-icon .icon-default,
-  .media-viewer-side-actions button:hover .post-image-icon.marked-icon .icon-default {
+  .media-viewer-side-actions
+    button:hover
+    .post-image-icon.marked-icon
+    .icon-default {
     opacity: 1;
   }
 
   .post-actions button:hover .post-image-icon .icon-hover,
   .detail-actions button:hover .post-image-icon .icon-hover,
-  .detail-actions .share-action:not(.disabled):hover .post-image-icon .icon-hover,
+  .detail-actions
+    .share-action:not(.disabled):hover
+    .post-image-icon
+    .icon-hover,
   .media-viewer-side-actions button:hover .post-image-icon .icon-hover,
-  .media-viewer-side-actions .share-action:not(.disabled):hover .post-image-icon .icon-hover {
+  .media-viewer-side-actions
+    .share-action:not(.disabled):hover
+    .post-image-icon
+    .icon-hover {
     opacity: 0;
   }
 }
