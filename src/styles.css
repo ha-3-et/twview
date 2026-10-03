@@ -1094,11 +1094,6 @@ button:disabled:hover {
   word-break: break-word;
   line-height: 1.35;
   font-size: 15px;
-<<<<<<< HEAD
-  font-feature-settings: "palt";
-=======
->>>>>>> 1c6ba45 (fix: 投稿文カーニング調整;)
-  font-kerning: auto;
 }
 .post-text-collapsed {
   display: -webkit-box;
