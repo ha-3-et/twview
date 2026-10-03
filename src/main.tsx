@@ -7,7 +7,7 @@ import Papa from 'papaparse'
 import { IconCameraPlus, IconClockHour4, IconHeart, IconLetterCase } from '@tabler/icons-react'
 import { Bookmark, ChevronDown, ChevronLeft, ChevronUp, Copy as CopyIcon, Ellipsis, ExternalLink, FileText, FileUp, Image, Languages, Menu, Play, Search, Sun, X } from 'lucide-react'
 import { createId } from './id'
-import { importText } from './importers'
+import { importFile, importText } from './importers'
 import type { Collection, CollectionType, EmbeddedPost, Media, Post, PostType, Profile } from './types'
 import './styles.css'
 
@@ -574,7 +574,7 @@ const downloadTextFile = (filename: string, content: string, type = 'text/csv;ch
   URL.revokeObjectURL(url)
 }
 const embeddedCsvHeaders = (prefix: string) => [`${prefix}: ID`, `${prefix}: 種類`, `${prefix}: 本文`, `${prefix}: 投稿URL`, `${prefix}: 投稿者名`, `${prefix}: 投稿者ユーザー名`, `${prefix}: 表示回数`, `${prefix}: ブックマーク数`, `${prefix}: いいね数`, `${prefix}: リポスト数`, `${prefix}: 返信数`, `${prefix}: 引用数`, `${prefix}: 日付`, `${prefix}: メディア種類`, `${prefix}: メディアURL`]
-const xporterCsvHeaders = ['ID', '本文', '投稿URL', '言語', '種類', '投稿者名', '投稿者ユーザー名', '表示回数', 'ブックマーク数', 'いいね数', 'リポスト数', '返信数', '引用数', '日付', 'リンク', 'メディア種類', 'メディアURL', '記事タイトル', '記事URL', '記事本文', '返信先の投稿 ID', '返信先ユーザー名', '会話 ID', ...embeddedCsvHeaders('返信先の投稿'), ...embeddedCsvHeaders('返信先投稿内の引用'), ...embeddedCsvHeaders('引用された投稿')]
+const xporterCsvHeaders = ['ID', '本文', '投稿URL', '言語', '種類', '投稿者名', '投稿者ユーザー名', '投稿者プロフィール画像URL', '表示回数', 'ブックマーク数', 'いいね数', 'リポスト数', '返信数', '引用数', '日付', 'リンク', 'メディア種類', 'メディアURL', '記事タイトル', '記事URL', '記事本文', '返信先の投稿 ID', '返信先ユーザー名', '会話 ID', ...embeddedCsvHeaders('返信先の投稿'), ...embeddedCsvHeaders('返信先投稿内の引用'), ...embeddedCsvHeaders('引用された投稿')]
 const embeddedCsvValues = (post?: EmbeddedPost) => [
   post?.id || '',
   postTypeExportValue(post?.type),
@@ -604,6 +604,7 @@ const collectionToXporterCsv = (collection: Collection) => {
       postTypeExportValue(post.type),
       !isUnknownAuthorName(post.authorName) ? post.authorName : collection.accountProfile?.displayName || '',
       normalizeHandle(post.username || collection.accountProfile?.username),
+      post.authorAvatarUrl || collection.accountProfile?.avatarUrl || '',
       post.viewCount ?? '',
       post.sourceBookmarkCount ?? '',
       post.likeCount ?? '',
@@ -1313,8 +1314,9 @@ function App() {
     setToast(copy.toast.collectionDeleted)
   }, [active?.id, closeDetail, collections, copy.toast.collectionDeleted, deletingCollection, infoCollectionId, view])
   const beginImport = async (file: File, choice?: CollectionType, title?: string) => {
-    const sourceText = await file.text()
-    const result = await importText(sourceText, file.name)
+    const isSpreadsheet = /\.(xlsx|xls)$/i.test(file.name)
+    const sourceText = isSpreadsheet ? '' : await file.text()
+    const result = await importFile(file)
     const chosenType = choice ?? result.collection.type
     const chosenTitle = title?.trim() || (chosenType === 'account' ? result.collection.accountProfile?.displayName : '') || result.collection.title
     const collectionBase = { ...result.collection, type: chosenType, title: chosenTitle, query: chosenTitle || result.collection.query, accountProfile: chosenType === 'account' ? { ...(result.collection.accountProfile || {}), displayName: chosenTitle } : result.collection.accountProfile }
@@ -2040,11 +2042,16 @@ function ImportView({ copy, onImport, onBack, onMenu }: { copy: Copy; onImport: 
     setError('')
     // ファイル内容を先に解析し、共通ハッシュタグを含む検索データは
     // キーワードとして扱う。解析に失敗した場合は従来どおりアカウントを初期値にする。
-    void f.text()
-      .then(sourceText => importText(sourceText, f.name))
+    void importFile(f)
       .then(result => setKind(result.collection.type === 'account' ? 'account' : 'keyword'))
       .catch(() => setKind('account'))
   }
+  useEffect(() => {
+    const input = document.querySelector<HTMLInputElement>('.drop-zone input[type="file"]')
+    if (input) input.accept = '.csv,.xml,.json,.xlsx,.xls,text/csv,text/xml,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
+    const formats = document.querySelector<HTMLElement>('.drop-zone > span:last-child')
+    if (formats && !file) formats.textContent = 'CSV / XML / JSON / XLSX'
+  }, [file])
   useEffect(() => {
     const select = document.querySelector<HTMLSelectElement>('.import-options select')
     select?.querySelector('option[value="hashtag"]')?.remove()

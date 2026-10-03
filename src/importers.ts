@@ -59,12 +59,36 @@ const inferType = (rows: Row[], source: SourceKind): CollectionType => {
   const account = source === 'octoparse' ? parseParams(query).account : ''
   if (account) return 'account'
   const handleKey = source === 'octoparse' ? 'User_Handle' : source === 'twsearchexport' ? 'Handle' : source === 'twibot' ? 'handle' : source === 'twispo' ? '@' : source === 'xporter' ? '投稿者ユーザー名' : 'username'
-  const handles = new Set(rows.map(r => handle(text(r, handleKey))).filter(Boolean))
+  const handles = new Set(rows.map(r => source === 'xporter'
+    ? handle(firstOf([r], xporterKeys.username) || '')
+    : handle(text(r, handleKey))).filter(Boolean))
   return handles.size <= 1 ? 'account' : 'keyword'
 }
 const first = (rows: Row[], key: string) => rows.map(r => text(r, key)).find(Boolean)
-const firstOf = (rows: Row[], keys: string[]) => keys.map(key => first(rows, key)).find(Boolean)
-const avatarKeys = ['Profile_Image_URL', 'Profile_Image', 'Avatar_URL', 'Avatar', 'User_Profile_Image_URL', 'profile_image_url', 'profile_image', 'avatar_url']
+const firstOf = (rows: Row[], keys: readonly string[]) => keys.map(key => first(rows, key)).find(Boolean)
+const avatarKeys = [
+  'Profile_Image_URL', 'Profile_Image', 'Avatar_URL', 'Avatar', 'User_Profile_Image_URL',
+  'profile_image_url', 'profile_image', 'avatar_url',
+  'author_profile_image_url', 'authorProfileImageUrl', 'Author_Profile_Image_URL',
+  'author_profile_image', 'authorProfileImage', 'Author_Profile_Image',
+  'Author Profile Image URL', 'Author Profile Image', 'Profile Image URL', 'Profile Image',
+  '投稿者プロフィール画像URL', '投稿者プロフィール画像', '投稿者画像URL', 'プロフィール画像URL', 'プロフィール画像'
+]
+const xporterKeys = {
+  id: ['ID', 'id', 'Post_ID', 'post_id', 'Tweet ID', 'Post ID'],
+  text: ['本文', 'Text', 'text', 'Tweet_Text', 'tweet_text', 'TweetText', 'Tweet Text', 'Post Text'],
+  date: ['日付', 'Date', 'date', 'Created_At', 'created_at', 'TweetCreateTime', 'Created At', 'Tweet Create Time'],
+  postUrl: ['投稿URL', 'Post_URL', 'post_url', 'Tweet_URL', 'tweet_url', 'TweetURL', 'URL', 'url', 'Post URL', 'Tweet URL'],
+  authorName: ['投稿者名', 'Author_Name', 'author_name', 'authorName', 'Display_Name', 'display_name', 'Name', 'name', 'Author Name', 'Display Name'],
+  username: ['投稿者ユーザー名', 'Author_Username', 'author_username', 'authorUsername', 'Author Username'],
+  language: ['言語', 'Language', 'language', 'Lang', 'lang'],
+  type: ['種類', 'Type', 'type', 'Post_Type', 'post_type', 'Post Type'],
+  links: ['リンク', 'Links', 'links', 'URLs', 'urls', 'Link URLs'],
+  hashtags: ['ハッシュタグ', 'Hashtags', 'hashtags'],
+  mediaUrl: ['メディアURL', 'Media_URL', 'media_url', 'MediaURL', 'mediaUrls', 'media_urls', 'Media URL', 'Media URLs'],
+  mediaType: ['メディア種類', 'Media_Type', 'media_type', 'MediaType', 'Media Type']
+} as const
+const xporterField = (row: Row, field: keyof typeof xporterKeys) => firstOf([row], xporterKeys[field]) || ''
 const usernameKeys = ['User_Handle', 'Username', 'User_Name_ID', 'Screen_Name', 'screen_name', 'username', 'user_screen_name', 'user_name']
 const authorNameKeys = ['User_Name', 'Name', 'Display_Name', 'display_name', 'name']
 const followerKeys = ['Follower_Count', 'Followers_Count', 'Followers', 'followers_count', 'followers']
@@ -340,6 +364,44 @@ const xporterEmbeddedPost = (row: Row, prefix: string): EmbeddedPost | undefined
   }
 }
 function fromXPorter(row: Row): Post {
+  // Xporterの英語・日本語ローカライズ列を優先して解決する。
+  const localizedText = xporterField(row, 'text')
+  const localizedUrl = xporterField(row, 'postUrl')
+  const localizedUsername = xporterField(row, 'username')
+  const legacyJapaneseColumns = ['ID', '本文', '投稿URL', '種類', '投稿者ユーザー名'].every(key => key in row)
+  if ((localizedText || localizedUrl || localizedUsername) && !legacyJapaneseColumns) {
+    const media = mediaFrom(xporterField(row, 'mediaUrl'), xporterField(row, 'mediaType'))
+    const authorAvatarUrl = avatarKeys.map(key => text(row, key)).find(Boolean)
+    return {
+      id: resolvedPostId(xporterField(row, 'id'), localizedUrl),
+      text: localizedText,
+      createdAt: normalizeDate(xporterField(row, 'date')),
+      postUrl: localizedUrl,
+      language: xporterField(row, 'language'),
+      type: resolvedPostType(xporterField(row, 'type'), localizedText),
+      authorName: xporterField(row, 'authorName'),
+      username: handle(localizedUsername),
+      authorAvatarUrl,
+      hashtags: values(xporterField(row, 'hashtags')).map(value => value.replace(/^[#＃]/, '')),
+      urls: values(xporterField(row, 'links')),
+      media: media.length ? media : undefined,
+      client: text(row, 'source') || text(row, 'Source') || text(row, 'client'),
+      authorId: text(row, 'author_id') || text(row, 'Author ID'),
+      replyCount: number(text(row, 'reply_count') || text(row, 'Reply_Count') || text(row, '返信数')),
+      repostCount: number(text(row, 'repost_count') || text(row, 'Repost_Count') || text(row, 'retweet_count') || text(row, 'Retweet Count') || text(row, 'リポスト数')),
+      likeCount: number(text(row, 'like_count') || text(row, 'Like_Count') || text(row, 'favorite_count') || text(row, 'Favorite Count') || text(row, 'いいね数')),
+      viewCount: number(text(row, 'view_count') || text(row, 'View_Count') || text(row, 'Views') || text(row, '表示回数')),
+      quoteCount: number(text(row, 'quote_count') || text(row, 'Quote_Count') || text(row, 'Quote Count') || text(row, '引用数')),
+      sourceBookmarkCount: number(text(row, 'bookmark_count') || text(row, 'Bookmark_Count') || text(row, 'Bookmark Count') || text(row, 'ブックマーク数')),
+      article: (() => {
+        const title = text(row, 'article_title') || text(row, 'Article Title')
+        const url = text(row, 'article_url') || text(row, 'Article URL')
+        const body = text(row, 'article_text') || text(row, 'Article Text')
+        return title || url || body ? { title, url, body } : undefined
+      })(),
+      raw: row
+    }
+  }
   const postUrl = text(row, '投稿URL')
   const tweetText = contentText(row, '本文')
   const media = mediaFrom(text(row, 'メディアURL'), text(row, 'メディア種類'))
@@ -356,6 +418,7 @@ function fromXPorter(row: Row): Post {
     text: tweetText, createdAt: normalizeDate(text(row, '日付')), postUrl,
     language: text(row, '言語'), type: quotedPost ? 'quote' : resolvedPostType(text(row, '種類'), tweetText),
     authorName: text(row, '投稿者名'), username: handle(text(row, '投稿者ユーザー名')),
+    authorAvatarUrl: avatarKeys.map(key => text(row, key)).find(Boolean),
     urls: values(text(row, 'リンク')), media: media.length ? media : undefined, article,
     replyCount: number(text(row, '返信数')), repostCount: number(text(row, 'リポスト数')),
     likeCount: number(text(row, 'いいね数')), viewCount: number(text(row, '表示回数')),
@@ -388,7 +451,9 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
   const twsearchexport = ['ID', 'Name', 'Handle', 'TweetText', 'TweetCreateTime'].every(key => key in rows[0])
   const twibot = ['id', 'tweetText', 'tweetURL', 'type', 'tweetAuthor', 'handle', 'createdAt'].every(key => key in rows[0])
   const twispo = ['投稿日時', 'テキスト', 'URL', 'imp', '@', '名前'].every(key => key in rows[0])
-  const xporter = ['ID', '本文', '投稿URL', '種類', '投稿者ユーザー名'].every(key => key in rows[0])
+  const xporter = xporterKeys.id.some(key => key in rows[0])
+    && xporterKeys.text.some(key => key in rows[0])
+    && (xporterKeys.username.some(key => key in rows[0]) || xporterKeys.postUrl.some(key => key in rows[0]))
   if (!octoparse && !twexportly && !twsearchexport && !twibot && !twispo && !xporter) throw new Error('対応する取得形式を判定できませんでした。')
   const source: SourceKind = octoparse ? 'octoparse' : twsearchexport ? 'twsearchexport' : twibot ? 'twibot' : twispo ? 'twispo' : xporter ? 'xporter' : 'twexportly'
   const warnings: string[] = []
@@ -437,7 +502,7 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
         : source === 'twispo'
           ? handle(first(rows, '@') || '')
           : source === 'xporter'
-            ? handle(first(rows, '投稿者ユーザー名') || '')
+            ? handle(firstOf(rows, xporterKeys.username) || '')
             : handle(firstOf(rows, usernameKeys) || '')
   const profile: Profile | undefined = source === 'octoparse' ? {
     displayName: first(rows, 'User_Name'), username, avatarUrl: firstOf(rows, avatarKeys), bio: first(rows, 'Intro'), website: first(rows, 'Website'),
@@ -452,9 +517,10 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
     displayName: first(rows, '名前'), username, bio: first(rows, '自己紹介'), joinedAt: first(rows, 'アカウント作成日'),
     followersCount: number(first(rows, 'フォロワー数') ?? ''), followingCount: number(first(rows, 'フォロー数') ?? '')
   } : source === 'xporter' && type === 'account' ? {
-    displayName: first(rows, '投稿者名'), username, avatarUrl: first(rows, 'AvatarURL'), headerImageUrl: first(rows, 'ProfileBannerURL'),
+    displayName: firstOf(rows, xporterKeys.authorName), username, avatarUrl: firstOf(rows, avatarKeys), headerImageUrl: first(rows, 'ProfileBannerURL'),
     bio: first(rows, 'Bio'), website: first(rows, 'LinkInBio'), location: first(rows, 'Location'),
-    followersCount: number(first(rows, 'FollowersCount') ?? ''), followingCount: number(first(rows, 'FollowingCount') ?? '')
+    followersCount: number(firstOf(rows, ['FollowersCount', 'followers_count', 'Followers Count']) ?? ''),
+    followingCount: number(firstOf(rows, ['FollowingCount', 'following_count', 'Following Count']) ?? '')
   } : undefined
   const fallback = detectedQuery || (type === 'account' ? (username ? `@${username}` : '不明なアカウント') : '検索結果')
   const collection: Collection = {
@@ -464,24 +530,51 @@ function buildCollection(rows: Row[], format: 'CSV' | 'XML' | 'JSON', filename: 
   const sourceLabel = source === 'octoparse' ? 'Octoparse Twitter Scraper' : source === 'twsearchexport' ? 'TwSearchExport' : source === 'twibot' ? 'TwiBot' : source === 'twispo' ? 'ついすぽ -Tweet Export-' : source === 'xporter' ? 'XPorter' : 'TwExportly'
   return { collection, source: sourceLabel, warnings }
 }
-export async function importText(content: string, filename: string): Promise<ImportResult> {
-  const trimmed = content.trim()
-  if (filename.toLowerCase().endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try { return buildXApiCollection(JSON.parse(trimmed), filename) }
+export async function importText(content: string | ArrayBuffer, filename: string): Promise<ImportResult> {
+  const lowerFilename = filename.toLowerCase()
+  if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls')) {
+    if (typeof content === 'string') throw new Error('XLSXファイルの読み込みにはバイナリデータが必要です')
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.read(content, { type: 'array' })
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+    if (!firstSheet) throw new Error('XLSXに読み込めるシートがありません')
+    const csv = XLSX.utils.sheet_to_csv(firstSheet, { blankrows: false })
+    return importText(csv, filename.replace(/\.(xlsx|xls)$/i, '.csv'))
+  }
+  const textContent = typeof content === 'string' ? content : new TextDecoder().decode(content)
+  const trimmed = textContent.trim()
+  if (lowerFilename.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      const records = Array.isArray(parsed)
+        ? parsed
+        : isObject(parsed)
+          ? ['posts', 'tweets', 'statuses', 'data'].flatMap(key => Array.isArray(parsed[key]) ? parsed[key] : [])
+          : []
+      const rows = records.filter(isObject).map(record => Object.fromEntries(Object.entries(record).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value)
+      ])) as Row)
+      const looksLikeXporter = rows.length > 0
+        && xporterKeys.id.some(key => key in rows[0])
+        && xporterKeys.text.some(key => key in rows[0])
+        && (xporterKeys.username.some(key => key in rows[0]) || avatarKeys.some(key => key in rows[0]))
+      return looksLikeXporter ? buildCollection(rows, 'JSON', filename) : buildXApiCollection(parsed, filename)
+    }
     catch (error) {
       if (error instanceof SyntaxError) throw new Error('JSONの形式が正しくありません。')
       throw error
     }
   }
-  if (filename.toLowerCase().endsWith('.xml')) {
-    const doc = new DOMParser().parseFromString(content, 'application/xml')
+  if (lowerFilename.endsWith('.xml')) {
+    const doc = new DOMParser().parseFromString(textContent, 'application/xml')
     if (doc.querySelector('parsererror')) throw new Error('XMLの形式が正しくありません。')
     const rows = [...doc.querySelectorAll('item')].map(item => Object.fromEntries([...item.children].map(el => [el.tagName, el.textContent ?? ''])))
     return buildCollection(rows, 'XML', filename)
   }
-  const twibotHeader = /^id,tweetText,tweetURL,type,tweetAuthor,handle,/m.exec(content)
-  const twibotQuery = /(?:contains\s+(?:hashtag|keyword|search)?\s*results\s+for|(?:search(?:\s+(?:query|keyword))?|keyword)\s*[:=])\s*['\"]([^'\"]+)/i.exec(content.slice(0, twibotHeader?.index ?? 0))?.[1]
-  const csvContent = twibotHeader ? content.slice(twibotHeader.index) : content
+  const twibotHeader = /^id,tweetText,tweetURL,type,tweetAuthor,handle,/m.exec(textContent)
+  const twibotQuery = /(?:contains\s+(?:hashtag|keyword|search)?\s*results\s+for|(?:search(?:\s+(?:query|keyword))?|keyword)\s*[:=])\s*['\"]([^'\"]+)/i.exec(textContent.slice(0, twibotHeader?.index ?? 0))?.[1]
+  const csvContent = twibotHeader ? textContent.slice(twibotHeader.index) : textContent
   return new Promise((resolve, reject) => Papa.parse<Row>(csvContent, { header: true, skipEmptyLines: 'greedy', complete: result => {
     if (result.errors.length) reject(new Error(`CSVを解析できませんでした: ${result.errors[0].message}`))
     else { try { resolve(buildCollection(result.data, 'CSV', filename, { query: twibotQuery })) } catch (error) { reject(error) } }
@@ -489,5 +582,6 @@ export async function importText(content: string, filename: string): Promise<Imp
 }
 
 export async function importFile(file: File): Promise<ImportResult> {
-  return importText(await file.text(), file.name)
+  const isSpreadsheet = /\.(xlsx|xls)$/i.test(file.name)
+  return importText(isSpreadsheet ? await file.arrayBuffer() : await file.text(), file.name)
 }
