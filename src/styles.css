@@ -1691,7 +1691,7 @@ button:disabled:hover {
   width: 18px;
   height: 18px;
   position: relative;
-  top: 1px;
+  bottom: 1px;
 }
 .post-image-icon {
   position: relative;
